@@ -1,0 +1,44 @@
+{
+    "id":  "pf1e-party-folder",
+    "title":  "Pathfinder 1e Party Folder",
+    "description":  "РџР°РїРєР° РїР°СЂС‚РёРё РґР»СЏ Pathfinder 1e РІ Foundry VTT v11. Р’РµСЂСЃРёСЏ 1.0.11: Р±С‹СЃС‚СЂС‹Рµ РїР»СЋСЃ/РјРёРЅСѓСЃ РІ С‚Р°Р№РЅРёРєРµ, РїСЂРѕР·СЂР°С‡РЅРѕСЃС‚СЊ РєРЅРѕРїРѕРє РїСЂРё РЅР°РІРµРґРµРЅРёРё Рё СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ С†РµРЅС‹ Р·Р° С€С‚СѓРєСѓ СЃ РїРµСЂРµСЃС‡С‘С‚РѕРј РѕР±С‰РµР№ С†РµРЅС‹ СЃС‚РѕРїРєРё.",
+    "version":  "1.0.11",
+    "compatibility":  {
+                          "minimum":  "11",
+                          "verified":  "11.315"
+                      },
+    "authors":  [
+                    {
+                        "name":  "OpenAI / ChatGPT"
+                    }
+                ],
+    "relationships":  {
+                          "systems":  [
+                                          {
+                                              "id":  "pf1",
+                                              "type":  "system",
+                                              "compatibility":  {
+                                                                    "minimum":  "9.6",
+                                                                    "verified":  "9.6"
+                                                                }
+                                          }
+                                      ]
+                      },
+    "esmodules":  [
+                      "scripts/pf1e-party-folder.js"
+                  ],
+    "styles":  [
+                   "styles/pf1e-party-folder.css"
+               ],
+    "languages":  [
+                      {
+                          "lang":  "ru",
+                          "name":  "Р СѓСЃСЃРєРёР№",
+                          "path":  "lang/ru.json"
+                      }
+                  ],
+    "url":  "https://github.com/YuriWinnight/Pathfinder-1e-Party-Folder",
+    "manifest":  "https://github.com/YuriWinnight/Pathfinder-1e-Party-Folder/releases/latest/download/module.json",
+    "download":  "https://github.com/YuriWinnight/Pathfinder-1e-Party-Folder/releases/download/v1.0.11/pf1e-party-folder-v1.0.11.zip",
+    "license":  "MIT"
+}
