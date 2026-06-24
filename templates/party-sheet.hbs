@@ -1,4 +1,4 @@
-<form class="pf1-party-sheet-root" autocomplete="off">
+<form class="pf1-party-sheet-root {{party.portraitClass}}" autocomplete="off">
   <header class="pf1-party-hero">
     <div class="pf1-party-token-wrap">
       <div class="pf1-party-token-drag" draggable="true" title="Перетащить токен партии на сцену">
@@ -11,7 +11,7 @@
     </div>
     <div class="pf1-party-right-title">
       <div>ПАРТИЯ</div>
-      <span class="pf1-metagame-open" data-action="metagame-settings" title="Метаигровая информация"><i class="fas fa-eye"></i> {{party.permissionLabel}}</span>
+      <span class="pf1-metagame-open" data-action="metagame-settings" title="Метаигровая информация"><i class="fas fa-cog"></i> {{party.permissionLabel}}</span>
       <small class="pf1-party-version">{{party.moduleVersion}}</small>
     </div>
   </header>
@@ -45,14 +45,20 @@
           </div>
 
           <div class="tab" data-group="overview" data-tab="skills">
-            {{#if skills.length}}
-              <div class="pf1-chip-list pf1-skill-list">
-                {{#each skills}}
-                  <button type="button" class="pf1-chip pf1-skill-chip" data-action="roll-skill" data-actor-id="{{bestActorId}}" data-skill-id="{{id}}" title="Лучший: {{bestActorName}}">
-                    <span class="pf1-skill-label">{{label}}</span>
-                    <strong class="pf1-skill-bonus">{{signed best}}</strong>
-                    <span class="pf1-skill-best">Лучший: {{bestActorName}}</span>
-                  </button>
+            {{#if skillGroups.length}}
+              <div class="pf1-skill-groups">
+                {{#each skillGroups}}
+                  <section class="pf1-skill-group pf1-skill-group-{{id}}">
+                    <h4>{{label}}</h4>
+                    <div class="pf1-chip-list pf1-skill-list">
+                      {{#each items}}
+                        <button type="button" class="pf1-chip pf1-skill-chip {{toneClass}} {{#if invested}}is-invested{{/if}}" data-action="roll-skill" data-skill-id="{{id}}" data-skill-label="{{label}}" data-tooltip="{{tooltipHtml}}">
+                          <span class="pf1-skill-main"><span class="pf1-skill-label">{{label}}</span><strong class="pf1-skill-bonus">{{signed best}}</strong></span>
+                          <span class="pf1-skill-best">Лучший: {{bestActorName}}</span>
+                        </button>
+                      {{/each}}
+                    </div>
+                  </section>
                 {{/each}}
               </div>
             {{else}}
@@ -61,14 +67,20 @@
           </div>
 
           <div class="tab" data-group="overview" data-tab="knowledge">
-            {{#if knowledgeSkills.length}}
-              <div class="pf1-chip-list pf1-skill-list">
-                {{#each knowledgeSkills}}
-                  <button type="button" class="pf1-chip pf1-skill-chip" data-action="roll-skill" data-actor-id="{{bestActorId}}" data-skill-id="{{id}}" title="Лучший: {{bestActorName}}">
-                    <span class="pf1-skill-label">{{label}}</span>
-                    <strong class="pf1-skill-bonus">{{signed best}}</strong>
-                    <span class="pf1-skill-best">Лучший: {{bestActorName}}</span>
-                  </button>
+            {{#if knowledgeGroups.length}}
+              <div class="pf1-skill-groups">
+                {{#each knowledgeGroups}}
+                  <section class="pf1-skill-group pf1-skill-group-{{id}}">
+                    <h4>{{label}}</h4>
+                    <div class="pf1-chip-list pf1-skill-list">
+                      {{#each items}}
+                        <button type="button" class="pf1-chip pf1-skill-chip {{toneClass}} {{#if invested}}is-invested{{/if}}" data-action="roll-skill" data-skill-id="{{id}}" data-skill-label="{{label}}" data-tooltip="{{tooltipHtml}}">
+                          <span class="pf1-skill-main"><span class="pf1-skill-label">{{label}}</span><strong class="pf1-skill-bonus">{{signed best}}</strong></span>
+                          <span class="pf1-skill-best">Лучший: {{bestActorName}}</span>
+                        </button>
+                      {{/each}}
+                    </div>
+                  </section>
                 {{/each}}
               </div>
             {{else}}
@@ -83,18 +95,36 @@
           <article class="pf1-party-member-row">
             <div class="pf1-party-member-portrait">
               <img src="{{img}}" alt="{{name}}">
-              <div class="pf1-party-hp"><i class="fas fa-heart"></i> {{hp.value}} / {{hp.max}}</div>
+              <div class="pf1-party-hp" style="--pf1-hp-width: {{hp.width}};"><i class="fas fa-heart"></i> {{hp.value}} / {{hp.max}}</div>
             </div>
             <div class="pf1-party-member-main">
-              <div class="pf1-party-member-name">{{name}} <span class="pf1-remove-member" data-action="remove-member" data-actor-id="{{id}}" title="Убрать из партии">×</span></div>
+              <div class="pf1-party-member-header">
+                <div class="pf1-party-member-name">{{name}} <span class="pf1-remove-member" data-action="remove-member" data-actor-id="{{id}}" title="Убрать из партии">×</span></div>
+                <a class="pf1-hero-points" data-action="adjust-hero-points" data-actor-id="{{id}}" title="Геройские очки: {{heroPoints.value}} / {{heroPoints.max}}. ЛКМ +1, ПКМ −1. Shift+клик по броску: +8 перед броском.">
+                  {{#each heroPoints.pips}}
+                    {{#if filled}}
+                      <img class="pf1-hero-point-pip is-filled" data-index="{{index}}" src="{{../heroPoints.icon}}" alt="">
+                    {{else}}
+                      <span class="pf1-hero-point-pip is-empty" data-index="{{index}}"></span>
+                    {{/if}}
+                  {{/each}}
+                </a>
+              </div>
               <div class="pf1-party-statline">
                 <div class="pf1-ac"><span>КБ</span><strong>{{ac}}</strong></div>
-                <div class="pf1-save"><span>Стойкость</span><strong>{{signed saves.fort}}</strong></div>
-                <div class="pf1-save"><span>Реакция</span><strong>{{signed saves.ref}}</strong></div>
-                <div class="pf1-save"><span>Воля</span><strong>{{signed saves.will}}</strong></div>
+                <section class="pf1-saving-throws">
+                  <div class="pf1-save"><span>Стойкость</span><strong>{{signed saves.fort}}</strong></div>
+                  <div class="pf1-save"><span>Реакция</span><strong>{{signed saves.ref}}</strong></div>
+                  <div class="pf1-save"><span>Воля</span><strong>{{signed saves.will}}</strong></div>
+                </section>
                 <div class="pf1-senses"><span>Чувства</span><strong>{{senses}}</strong></div>
               </div>
-              <button type="button" class="pf1-perception" data-action="roll-skill" data-actor-id="{{id}}" data-skill-id="per">Внимание {{signed perception}}</button>
+              <div class="pf1-member-skill-tags">
+                <button type="button" class="pf1-perception" data-action="roll-skill" data-actor-id="{{id}}" data-skill-id="per" title="Shift+клик: геройское очко +8 перед броском">Внимание {{signed perception}}</button>
+                {{#each investedSkills}}
+                  <button type="button" class="pf1-member-skill-tag" data-action="roll-skill" data-actor-id="{{../id}}" data-skill-id="{{id}}" title="Ранги: {{fmt ranks 0}}. Shift+клик: геройское очко +8 перед броском">{{label}} {{signed bonus}}</button>
+                {{/each}}
+              </div>
             </div>
           </article>
         {{/each}}
@@ -103,7 +133,7 @@
 
     <section class="tab" data-group="primary" data-tab="exploration">
       <div class="pf1-party-exploration-layout">
-        <aside class="pf1-party-side">
+        <aside class="pf1-party-side pf1e2-exploration-sidebar sidebar">
           <div class="pf1-side-table">
             <h3>Путешествие партии</h3>
             <div><span>Скорость путешествия</span><b>{{travel.speed}} фт</b></div>
@@ -113,17 +143,24 @@
             <div><span>Активностей исследования</span><b>{{travel.activitySlots}}</b></div>
           </div>
 
+          <ol class="box-list exploration-members">
           {{#each members}}
-            <article class="pf1-small-member-card">
-              <img src="{{img}}" alt="{{name}}">
-              <div class="pf1-small-member-info">
-                <strong>{{name}}</strong>
-                <span><i class="fas fa-shoe-prints"></i> {{speed}} фт</span>
-                <span><i class="fas fa-eye"></i> {{perception}}</span>
-                <span><i class="fas fa-heart"></i> {{hp.value}} / {{hp.max}}</span>
+            <li class="box member pf1-small-member-card">
+              <div class="actor-link content">
+                <img src="{{img}}" alt="{{name}}">
+                <span class="name">{{name}}</span>
               </div>
-            </article>
+              <div class="sub-data">
+                <span class="pf1-small-member-speed"><i class="fas fa-shoe-prints"></i> {{speed}} фт</span>
+                <span class="pf1-small-member-perception"><i class="fas fa-eye"></i> {{perception}}</span>
+              </div>
+              <footer class="health-bar pf1-small-member-hp" style="--pf1-hp-width: {{hp.width}};">
+                <div class="bar pf1-small-member-hp-fill" style="width: {{hp.width}};"></div>
+                <span class="pf1-small-member-hp-content"><i class="fas fa-heart"></i> <span class="pf1-small-member-hp-value">{{hp.value}} / {{hp.max}}</span></span>
+              </footer>
+            </li>
           {{/each}}
+          </ol>
         </aside>
 
         <section class="pf1-party-exploration-main">
@@ -161,14 +198,16 @@
             <div><span>Вес</span><b>{{partyTotals.weight}} фнт.</b></div>
           </div>
           {{#each members}}
-            <article class="pf1-small-member-card">
-              <img src="{{img}}" alt="{{name}}">
-              <div class="pf1-small-member-info">
-                <strong>{{name}}</strong>
-                <span><i class="fas fa-coins"></i> {{wealth.coinGp}} зм</span>
-                <span><i class="fas fa-balance-scale"></i> {{wealth.wealthGp}} зм</span>
-                <span>Вес — {{wealth.weight}} фнт.</span>
+            <article class="pf1-small-member-card pf1-inventory-member-card">
+              <div class="pf1-small-member-content">
+                <img src="{{img}}" alt="{{name}}">
+                <div class="pf1-small-member-info">
+                  <strong>{{name}}</strong>
+                  <span><i class="fas fa-coins"></i> {{wealth.coinGp}} зм</span>
+                  <span><i class="fas fa-balance-scale"></i> {{wealth.wealthGp}} зм</span>
+                </div>
               </div>
+              <footer class="pf1-small-member-weight">Вес — {{wealth.weight}} фнт.</footer>
             </article>
           {{/each}}
         </aside>
@@ -179,9 +218,9 @@
             {{#each stash.currencyArray}}
               <label class="pf1-coin" title="Можно ввести число, +10 или -10"><img src="{{img}}" alt="{{label}}"><input type="text" class="pf1-currency-input" data-coin="{{key}}" value="{{value}}"></label>
             {{/each}}
-            <button type="button" data-action="add-currency" title="Добавить валюту">+</button>
-            <button type="button" data-action="subtract-currency" title="Вычесть валюту">−</button>
-            <button type="button" data-action="split-currency" title="Распределить монеты между участниками"><i class="fas fa-share"></i></button>
+            <button type="button" data-action="add-currency" title="Добавить валюту"><span aria-hidden="true">+</span></button>
+            <button type="button" data-action="subtract-currency" title="Вычесть валюту"><span aria-hidden="true">−</span></button>
+            <button type="button" data-action="split-currency" title="Распределить монеты между участниками"><i class="fas fa-share fa-fw"></i></button>
           </div>
           <div class="pf1-stash-total-line">
             <b><i class="fas fa-coins"></i> Общая валюта</b> {{stashTotals.coinGp}} зм
@@ -189,36 +228,47 @@
           </div>
           <div class="pf1-search-line"><i class="fas fa-search"></i><input type="search" class="pf1-stash-search" placeholder="Искать в инвентаре"></div>
 
-          {{#each stash.categories}}
-            <details class="pf1-stash-category" open>
-              <summary>
-                <span>{{label}}</span>
-                <em class="pf1-stash-columns"><span>Цена</span><span>Количество</span><span>Вес</span></em>
-                <button type="button" data-action="stash-category-add" data-category="{{id}}" title="Создать предмет">+</button>
-              </summary>
-              <div class="pf1-stash-item-list">
-                {{#each items}}
-                  <div class="pf1-stash-item pf1-party-item {{#if emptyStack}}is-empty-stack{{/if}}" data-item-id="{{stashId}}" draggable="true">
-                    <img src="{{img}}" alt="{{name}}">
-                    <span class="pf1-stash-item-name">{{name}}</span>
-                    <label class="pf1-stash-price" title="Наведи или нажми, чтобы изменить цену за штуку"><input type="text" class="pf1-stash-field" data-field="price" data-item-id="{{stashId}}" data-price-each="{{priceEach}}" data-price-total="{{priceGp}}" value="{{priceGp}}"><span>зм</span></label>
-                    <span class="pf1-stash-quantity" data-item-id="{{stashId}}" title="Колесо мыши или кнопки меняют количество">
-                      <button type="button" data-action="change-stash-quantity" data-delta="-1" data-item-id="{{stashId}}" title="Убавить количество">−</button>
-                      <input type="number" class="pf1-stash-field pf1-stash-quantity-input" data-field="quantity" data-item-id="{{stashId}}" value="{{quantity}}" min="0" step="1">
-                      <button type="button" data-action="change-stash-quantity" data-delta="1" data-item-id="{{stashId}}" title="Добавить количество">+</button>
-                    </span>
-                    <label class="pf1-stash-weight" title="Изменить вес"><input type="text" class="pf1-stash-field" data-field="weight" data-item-id="{{stashId}}" value="{{weight}}"><span>фнт.</span></label>
-                    <button type="button" data-action="split-stash-item" data-item-id="{{stashId}}" title="Разделить стопку"><i class="fas fa-clone"></i></button>
-                    <button type="button" data-action="take-item" data-item-id="{{stashId}}" title="Забрать в лист"><i class="fas fa-hand-paper"></i></button>
-                    <button type="button" data-action="delete-stash-item" data-item-id="{{stashId}}" title="Удалить"><i class="fas fa-trash"></i></button>
+          <div class="pf1-stash-inventory-list">
+            {{#each stash.categories}}
+              <details class="pf1-stash-category" open>
+                <summary>
+                  <h3 class="pf1-stash-category-name">{{label}}</h3>
+                  <span class="pf1-stash-heading-price">Цена</span>
+                  <span class="pf1-stash-heading-quantity">Количество</span>
+                  <span class="pf1-stash-heading-weight">Вес</span>
+                  <div class="pf1-stash-category-controls">
+                    <button type="button" data-action="stash-category-add" data-category="{{id}}" title="Создать предмет"><i class="fas fa-plus"></i></button>
+                    <button type="button" data-action="open-item-library" data-category="{{id}}" title="Открыть библиотеки Pathfinder 1e"><i class="fas fa-search"></i></button>
                   </div>
-                {{else}}
-                  <div class="pf1-empty-row">Пусто</div>
-                {{/each}}
-              </div>
-            </details>
-          {{/each}}
-          <div class="pf1-stash-footer"><i class="fas fa-box"></i> ОБЩИЙ ВЕС: {{stashTotals.weight}} фнт.</div>
+                </summary>
+                <div class="pf1-stash-item-list {{#unless items.length}}is-empty{{/unless}}">
+                  {{#each items}}
+                    <div class="pf1-stash-item pf1-party-item {{#if emptyStack}}is-empty-stack{{/if}}" data-item-id="{{stashId}}" data-search="{{search}}" draggable="true">
+                      <div class="pf1-stash-item-name">
+                        <img src="{{img}}" alt="{{name}}">
+                        <span>{{name}}</span>
+                      </div>
+                      <label class="pf1-stash-price" title="Наведи или нажми, чтобы изменить цену за штуку"><input type="text" class="pf1-stash-field" data-field="price" data-item-id="{{stashId}}" data-price-each="{{priceEach}}" data-price-total="{{priceGp}}" value="{{priceGp}}"><span>зм</span></label>
+                      <span class="pf1-stash-quantity" data-item-id="{{stashId}}" title="Кнопки меняют количество">
+                        <button type="button" data-action="change-stash-quantity" data-delta="-1" data-item-id="{{stashId}}" title="Убавить количество">−</button>
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" class="pf1-stash-field pf1-stash-quantity-input" data-field="quantity" data-item-id="{{stashId}}" value="{{quantity}}">
+                        <button type="button" data-action="change-stash-quantity" data-delta="1" data-item-id="{{stashId}}" title="Добавить количество">+</button>
+                      </span>
+                      <label class="pf1-stash-weight" title="Изменить вес"><input type="text" class="pf1-stash-field" data-field="weight" data-item-id="{{stashId}}" value="{{weight}}"><span>фнт.</span></label>
+                      <div class="pf1-stash-item-controls">
+                        <button type="button" data-action="edit-stash-item" data-item-id="{{stashId}}" title="Редактировать"><i class="fas fa-edit"></i></button>
+                        <button type="button" data-action="split-stash-item" data-item-id="{{stashId}}" title="Разделить стопку"><i class="fas fa-divide"></i></button>
+                        <button type="button" data-action="take-item" data-item-id="{{stashId}}" title="Забрать в лист"><i class="fas fa-hand-paper"></i></button>
+                        <button type="button" data-action="delete-stash-item" data-item-id="{{stashId}}" title="Удалить"><i class="fas fa-trash"></i></button>
+                      </div>
+                      <div class="pf1-stash-item-description">{{{description}}}</div>
+                    </div>
+                  {{/each}}
+                </div>
+              </details>
+            {{/each}}
+          </div>
+          <div class="pf1-stash-footer"><img class="pf1-stash-footer-icon" src="modules/pf1e-party-folder/assets/pack-leather-white-tan.webp" alt=""> ОБЩИЙ ВЕС: {{stashTotals.weight}} фнт.</div>
         </section>
       </div>
     </section>

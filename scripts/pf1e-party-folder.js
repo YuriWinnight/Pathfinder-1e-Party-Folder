@@ -7,10 +7,36 @@ const MEMBERS_FLAG = "members";
 const STASH_FLAG = "stash";
 const ACTIVITIES_FLAG = "activities";
 const PUBLIC_SNAPSHOT_FLAG = "publicSnapshot";
+const HERO_POINTS_FLAG = "heroPoints";
 const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
-const MODULE_VERSION_LABEL = "v1.0.11-fix";
+const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
+const HERO_POINTS_MAX = 3;
+const MODULE_VERSION_LABEL = "v1.5.6";
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
+const HERO_POINT_SAVE_DELAY_MS = 180;
+const HERO_POINT_PRE_ROLL_BONUS = 8;
+const HERO_POINT_CHAT_BONUS = 4;
+let publicSnapshotRefreshTimer = null;
+const pendingHeroPointUpdates = new Map();
+const heroPointSaveTimers = new Map();
+const openStashItemSources = new Map();
+
+const PARTY_SCROLL_SELECTORS = [
+  ".window-content",
+  ".pf1-party-sheet-root",
+  ".pf1-party-body",
+  ".pf1-party-body > .tab",
+  ".pf1-party-body > .tab.active",
+  ".pf1-party-body > .tab[data-tab='overview']",
+  ".pf1-party-body > .tab[data-tab='exploration']",
+  ".pf1-party-body > .tab[data-tab='stash']",
+  ".pf1-party-stash-layout",
+  ".pf1-party-stash-main",
+  ".pf1-stash-inventory-list",
+  ".pf1-party-exploration-main",
+  ".pf1-party-overview-box"
+];
 
 const SKILL_LABELS_RU = {
   acr: "АКРОБАТИКА",
@@ -105,6 +131,11 @@ function signed(value) {
   return `${n >= 0 ? "+" : ""}${n}`;
 }
 
+function clampNumber(value, min, max) {
+  const n = toNumber(value, min);
+  return Math.min(max, Math.max(min, n));
+}
+
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -113,6 +144,215 @@ function escapeHTML(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+async function renderCompendiumBrowserCandidate(browser, tabNames = ["item", "items", "equipment"]) {
+  if (!browser || typeof browser !== "object") return false;
+
+  const uniqueTabs = [...new Set(tabNames.filter(Boolean))];
+  for (const tab of uniqueTabs) {
+    for (const method of ["renderWith", "openTab", "browse"]) {
+      if (typeof browser[method] !== "function") continue;
+      try {
+        await browser[method](tab);
+        return true;
+      } catch (err) {
+        console.debug(`${MODULE_ID} | Compendium browser ${method}(${tab}) failed`, err);
+      }
+    }
+  }
+
+  if (typeof browser.open === "function") {
+    for (const tab of uniqueTabs) {
+      try {
+        await browser.open({ tab });
+        return true;
+      } catch (err) {
+        console.debug(`${MODULE_ID} | Compendium browser open(${tab}) failed`, err);
+      }
+    }
+    try {
+      await browser.open();
+      return true;
+    } catch (err) {
+      console.debug(`${MODULE_ID} | Compendium browser open() failed`, err);
+    }
+  }
+
+  if (typeof browser.render === "function") {
+    try {
+      browser.render(true);
+      if (typeof browser.activateTab === "function") {
+        for (const tab of uniqueTabs) {
+          try {
+            browser.activateTab(tab);
+            break;
+          } catch (err) {
+            console.debug(`${MODULE_ID} | Compendium browser activateTab(${tab}) failed`, err);
+          }
+        }
+      }
+      return true;
+    } catch (err) {
+      console.debug(`${MODULE_ID} | Compendium browser render() failed`, err);
+    }
+  }
+
+  return false;
+}
+
+async function openNativePF1ItemBrowser(category = null) {
+  const categoryTabs = {
+    weapons: ["item", "items", "weapon", "weapons", "equipment"],
+    armor: ["item", "items", "armor", "equipment"],
+    consumables: ["item", "items", "consumable", "consumables", "equipment"],
+    equipment: ["item", "items", "equipment"],
+    ammo: ["item", "items", "ammunition", "ammo", "equipment"],
+    misc: ["item", "items", "equipment"],
+    goods: ["item", "items", "equipment"],
+    containers: ["item", "items", "equipment"]
+  };
+  const tabNames = categoryTabs[category] ?? ["item", "items", "equipment"];
+  const pf1 = game.pf1 ?? globalThis.pf1 ?? {};
+  const candidates = [
+    game.compendiumBrowser,
+    pf1.compendiumBrowser,
+    pf1.compendiumBrowser?.items,
+    pf1.compendiumBrowser?.item,
+    pf1.applications?.compendiumBrowser,
+    pf1.applications?.compendiumBrowser?.items,
+    pf1.applications?.compendiums?.items,
+    pf1.applications?.compendiums?.item,
+    ui.compendiumBrowser,
+    ui.compendiumBrowser?.items,
+    ui.compendiumBrowser?.item
+  ].filter(Boolean);
+
+  for (const browser of candidates) {
+    if (await renderCompendiumBrowserCandidate(browser, tabNames)) {
+      scheduleCompendiumBrowserCategoryFilters(category);
+      return true;
+    }
+  }
+
+  const BrowserClass = pf1.applications?.compendiumBrowser?.ItemBrowser
+    ?? pf1.applications?.compendiums?.ItemBrowser
+    ?? pf1.compendiumBrowser?.ItemBrowser
+    ?? globalThis.ItemBrowser;
+  if (typeof BrowserClass === "function") {
+    try {
+      const browser = new BrowserClass();
+      if (await renderCompendiumBrowserCandidate(browser, tabNames)) {
+        scheduleCompendiumBrowserCategoryFilters(category);
+        return true;
+      }
+    } catch (err) {
+      console.debug(`${MODULE_ID} | Could not create PF1 item browser`, err);
+    }
+  }
+
+  return false;
+}
+
+function normalizeBrowserFilterText(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase(game.i18n?.lang || "ru")
+    .replace(/\s+/g, " ");
+}
+
+function scheduleCompendiumBrowserCategoryFilters(category) {
+  if (!category) return;
+  for (const delay of [80, 250, 600]) {
+    setTimeout(() => applyCompendiumBrowserCategoryFilters(category), delay);
+  }
+}
+
+function getCompendiumBrowserCategoryFilters(category) {
+  const filterGroups = {
+    weapons: [{ section: "тип", labels: ["оружие"] }],
+    armor: [
+      { section: "тип", labels: ["снаряжение"] },
+      { section: "тип снаряжения", labels: ["броня", "щит"] }
+    ],
+    consumables: [{ section: "тип", labels: ["расходник"] }],
+    equipment: [
+      { section: "тип", labels: ["снаряжение"] },
+      { section: "тип снаряжения", labels: ["другой"] },
+      { section: "разное", labels: ["снаряжение"] }
+    ],
+    ammo: [
+      { section: "тип", labels: ["разное"] },
+      { section: "разное", labels: ["боеприпасы"] }
+    ],
+    goods: [
+      { section: "тип", labels: ["разное"] },
+      { section: "разное", labels: ["товары"] }
+    ],
+    misc: [
+      { section: "тип", labels: ["разное"] },
+      { section: "разное", labels: ["разное"] }
+    ],
+    containers: [{ section: "тип", labels: ["container", "контейнер"] }]
+  };
+  return filterGroups[category] ?? [];
+}
+
+function checkboxLabelText(input) {
+  const element = $(input);
+  const id = element.attr("id");
+  const explicit = id ? $("label").filter((_, label) => label.getAttribute("for") === id).first().text() : "";
+  return normalizeBrowserFilterText(explicit || element.closest("label").text() || element.parent().text());
+}
+
+function checkboxSectionText(input) {
+  const element = $(input);
+  const group = element.closest("fieldset, .filter, .filter-group, .filter-container, .form-group, section, div");
+  const headings = group
+    .find("legend, h1, h2, h3, h4, summary, button, .filter-title, .filter-header, .filter-label")
+    .map((_, el) => normalizeBrowserFilterText(el.textContent))
+    .get()
+    .filter(Boolean);
+  return headings.join(" ");
+}
+
+function applyCompendiumBrowserCategoryFilters(category) {
+  const filters = getCompendiumBrowserCategoryFilters(category);
+  if (!filters.length) return;
+  const windows = $(".window-app").filter((_, element) => {
+    const title = normalizeBrowserFilterText($(element).find(".window-title").first().text());
+    const text = normalizeBrowserFilterText($(element).text());
+    return title.includes("compendium browser") || title.includes("предмет") || text.includes("filtered items");
+  });
+  const labelsToManage = new Set([
+    "оружие", "снаряжение", "расходник", "container", "контейнер", "разное",
+    "броня", "щит", "волшебная вещица", "одежда", "другой", "боеприпасы", "товары"
+  ]);
+
+  for (const windowElement of windows) {
+    const root = $(windowElement);
+    const checkboxes = root.find('input[type="checkbox"]');
+    let changed = false;
+    checkboxes.each((_, input) => {
+      const label = checkboxLabelText(input);
+      if (!label || !labelsToManage.has(label)) return;
+      const section = checkboxSectionText(input);
+      const shouldCheck = filters.some(filter => {
+        const labelMatches = filter.labels.some(candidate => label === normalizeBrowserFilterText(candidate));
+        const sectionMatches = !filter.section || section.includes(normalizeBrowserFilterText(filter.section));
+        return labelMatches && sectionMatches;
+      });
+      if (input.checked !== shouldCheck) {
+        input.checked = shouldCheck;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        changed = true;
+      }
+    });
+    if (changed) {
+      const update = root.find("button").filter((_, el) => /обновить|update/i.test(el.textContent)).first();
+      update.trigger("click");
+    }
+  }
 }
 
 function formatSkillLabel(value) {
@@ -233,6 +473,7 @@ async function ensurePartyActor({ notify = true } = {}) {
         [PARTY_FLAG]: true,
         [MEMBERS_FLAG]: [],
         [ACTIVITIES_FLAG]: {},
+        [HERO_POINTS_FLAG]: {},
         [STASH_FLAG]: defaultStash()
       }
     }
@@ -311,6 +552,264 @@ async function removeMember(partyActor, actorId) {
   if (actor && folder && game.user.isGM && actor.folder?.id === folder.id) await actor.update({ folder: null });
 }
 
+function getStoredHeroPoints(partyActor) {
+  return deepClone(partyActor?.getFlag(MODULE_ID, HERO_POINTS_FLAG) ?? {});
+}
+
+function getHeroPoints(partyActor) {
+  const stored = getStoredHeroPoints(partyActor);
+  const pending = partyActor?.id ? pendingHeroPointUpdates.get(partyActor.id) : null;
+  return pending ? mergeObject(stored, pending, { inplace: false }) : stored;
+}
+
+function getHeroPointValue(heroPoints, actorId) {
+  return Math.floor(clampNumber(heroPoints?.[actorId], 0, HERO_POINTS_MAX));
+}
+
+function getHeroPointState(heroPoints, actorId) {
+  const value = getHeroPointValue(heroPoints, actorId);
+  return {
+    value,
+    max: HERO_POINTS_MAX,
+    icon: HERO_POINT_ICON,
+    pips: Array.from({ length: HERO_POINTS_MAX }, (_, index) => ({
+      index: index + 1,
+      filled: index < value
+    }))
+  };
+}
+
+async function setActorHeroPoints(partyActor, actorId, value) {
+  if (!partyActor || !actorId) return false;
+  if (!partyActor.testUserPermission(game.user, "OWNER")) {
+    ui.notifications.warn("Недостаточно прав для изменения геройских очков партии.");
+    return false;
+  }
+  const heroPoints = getHeroPoints(partyActor);
+  const next = Math.floor(clampNumber(value, 0, HERO_POINTS_MAX));
+  if (getHeroPointValue(heroPoints, actorId) === next) {
+    refreshHeroPointControls(actorId);
+    return true;
+  }
+  const pending = mergeObject(pendingHeroPointUpdates.get(partyActor.id) ?? {}, { [actorId]: next }, { inplace: false });
+  pendingHeroPointUpdates.set(partyActor.id, pending);
+  refreshHeroPointControls(actorId);
+  scheduleHeroPointSave(partyActor);
+  return true;
+}
+
+function scheduleHeroPointSave(partyActor) {
+  if (!partyActor?.id) return;
+  const currentTimer = heroPointSaveTimers.get(partyActor.id);
+  if (currentTimer) clearTimeout(currentTimer);
+  const partyId = partyActor.id;
+  heroPointSaveTimers.set(partyId, setTimeout(() => {
+    heroPointSaveTimers.delete(partyId);
+    const party = game.actors.get(partyId);
+    flushHeroPointSave(party).catch(err => console.warn(`${MODULE_ID} | Hero point save failed`, err));
+  }, HERO_POINT_SAVE_DELAY_MS));
+}
+
+async function flushHeroPointSave(partyActor) {
+  if (!partyActor?.id || !partyActor.testUserPermission(game.user, "OWNER")) return;
+  const pending = pendingHeroPointUpdates.get(partyActor.id);
+  if (!pending) return;
+  const nextHeroPoints = mergeObject(getStoredHeroPoints(partyActor), pending, { inplace: false });
+  const scrollSnapshots = captureOpenPartySheetScrolls();
+  await partyActor.update({ [`flags.${MODULE_ID}.${HERO_POINTS_FLAG}`]: nextHeroPoints }, { render: false, diff: true });
+  if (pendingHeroPointUpdates.get(partyActor.id) === pending) pendingHeroPointUpdates.delete(partyActor.id);
+  else scheduleHeroPointSave(partyActor);
+  schedulePublicPartySnapshotRefresh(partyActor);
+  restoreOpenPartySheetScrolls(scrollSnapshots);
+}
+
+async function changeActorHeroPoints(partyActor, actorId, delta) {
+  const heroPoints = getHeroPoints(partyActor);
+  return setActorHeroPoints(partyActor, actorId, getHeroPointValue(heroPoints, actorId) + toNumber(delta, 0));
+}
+
+async function spendHeroPoint(partyActor, actorId) {
+  const heroPoints = getHeroPoints(partyActor);
+  const current = getHeroPointValue(heroPoints, actorId);
+  if (current <= 0) {
+    const actorName = game.actors.get(actorId)?.name || "персонажа";
+    ui.notifications.warn(`У ${actorName} нет геройских очков.`);
+    return false;
+  }
+  return setActorHeroPoints(partyActor, actorId, current - 1);
+}
+
+function heroPointPipsHTML(state) {
+  return state.pips.map(pip => pip.filled
+    ? `<img class="pf1-hero-point-pip is-filled" data-index="${pip.index}" src="${escapeHTML(state.icon)}" alt="">`
+    : `<span class="pf1-hero-point-pip is-empty" data-index="${pip.index}"></span>`
+  ).join("");
+}
+
+function heroPointControlHTML(actorId, state, { className = "" } = {}) {
+  return `<a class="pf1-hero-points ${className}" data-action="adjust-hero-points" data-actor-id="${escapeHTML(actorId)}" title="Геройские очки: ${state.value} / ${state.max}. ЛКМ +1, ПКМ −1.">
+    ${heroPointPipsHTML(state)}
+  </a>`;
+}
+
+function refreshHeroPointControls(actorId) {
+  const party = getPartyActor();
+  if (!party || !actorId) return;
+  const state = getHeroPointState(getHeroPoints(party), actorId);
+  $(`.pf1-hero-points[data-actor-id="${actorId}"]`).each((_, element) => {
+    const control = $(element);
+    control.attr("title", `Геройские очки: ${state.value} / ${state.max}. ЛКМ +1, ПКМ −1.`);
+    updateHeroPointControlElement(element, state);
+  });
+}
+
+function updateHeroPointControlElement(element, state) {
+  const children = Array.from(element?.children ?? []);
+  if (children.length !== state.max) {
+    $(element).html(heroPointPipsHTML(state));
+    return;
+  }
+  for (const pip of state.pips) {
+    const child = children[pip.index - 1];
+    if (!child) continue;
+    const isFilled = child.tagName === "IMG";
+    if (isFilled === pip.filled) {
+      child.classList.toggle("is-filled", pip.filled);
+      child.classList.toggle("is-empty", !pip.filled);
+      child.classList.add("pf1-hero-point-pip");
+      child.dataset.index = String(pip.index);
+      if (pip.filled && child.getAttribute("src") !== state.icon) child.setAttribute("src", state.icon);
+      continue;
+    }
+    const next = document.createElement(pip.filled ? "img" : "span");
+    next.className = `pf1-hero-point-pip ${pip.filled ? "is-filled" : "is-empty"}`;
+    next.dataset.index = String(pip.index);
+    if (pip.filled) {
+      next.setAttribute("src", state.icon);
+      next.setAttribute("alt", "");
+    }
+    child.replaceWith(next);
+  }
+}
+
+function capturePartySheetScroll(app) {
+  const element = app?.element;
+  const body = element?.find?.(".pf1-party-body")[0];
+  const activeTab = element?.find?.(".pf1-party-body > .tab.active")[0];
+  const content = element?.find?.(".window-content")[0];
+  if (!body && !activeTab && !content) return null;
+  const scrollContainers = PARTY_SCROLL_SELECTORS.map(selector => {
+    const node = element?.find?.(selector)[0];
+    if (!node) return null;
+    return {
+      selector,
+      top: node.scrollTop ?? 0,
+      left: node.scrollLeft ?? 0
+    };
+  }).filter(Boolean);
+  return {
+    bodyTop: body?.scrollTop ?? 0,
+    bodyLeft: body?.scrollLeft ?? 0,
+    activeTabTop: activeTab?.scrollTop ?? 0,
+    activeTabLeft: activeTab?.scrollLeft ?? 0,
+    contentTop: content?.scrollTop ?? 0,
+    contentLeft: content?.scrollLeft ?? 0,
+    scrollContainers,
+    windowTop: globalThis.window?.scrollY ?? 0,
+    windowLeft: globalThis.window?.scrollX ?? 0
+  };
+}
+
+function restorePartySheetScroll(app, position) {
+  if (!position) return;
+  const restore = () => {
+    const element = app?.element;
+    const body = element?.find?.(".pf1-party-body")[0];
+    const activeTab = element?.find?.(".pf1-party-body > .tab.active")[0];
+    const content = element?.find?.(".window-content")[0];
+    if (body) {
+      body.scrollTop = position.bodyTop ?? position.top ?? 0;
+      body.scrollLeft = position.bodyLeft ?? position.left ?? 0;
+    }
+    if (activeTab) {
+      activeTab.scrollTop = position.activeTabTop ?? 0;
+      activeTab.scrollLeft = position.activeTabLeft ?? 0;
+    }
+    if (content) {
+      content.scrollTop = position.contentTop ?? 0;
+      content.scrollLeft = position.contentLeft ?? 0;
+    }
+    for (const saved of position.scrollContainers ?? []) {
+      const node = element?.find?.(saved.selector)[0];
+      if (!node) continue;
+      node.scrollTop = saved.top ?? 0;
+      node.scrollLeft = saved.left ?? 0;
+    }
+    globalThis.window?.scrollTo?.(position.windowLeft ?? 0, position.windowTop ?? 0);
+  };
+  restore();
+  globalThis.requestAnimationFrame?.(restore);
+  setTimeout(restore, 0);
+}
+
+function getPartySheetScrollLock(app) {
+  const lock = app?._pf1PartyScrollLock;
+  if (!lock) return null;
+  if (Date.now() > lock.until) {
+    delete app._pf1PartyScrollLock;
+    return null;
+  }
+  return lock.position;
+}
+
+function captureOpenPartySheetScrolls() {
+  return Object.values(ui.windows ?? {})
+    .map(app => ({ app, position: capturePartySheetScroll(app) }))
+    .filter(snapshot => snapshot.position);
+}
+
+function restoreOpenPartySheetScrolls(snapshots) {
+  for (const snapshot of snapshots ?? []) {
+    restorePartySheetScroll(snapshot.app, snapshot.position);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 50);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 150);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 300);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 650);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 1000);
+  }
+}
+
+function restoreOpenPartySheetScrollsBriefly(snapshots) {
+  for (const snapshot of snapshots ?? []) {
+    restorePartySheetScroll(snapshot.app, snapshot.position);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 50);
+    setTimeout(() => restorePartySheetScroll(snapshot.app, snapshot.position), 125);
+  }
+}
+
+function lockOpenPartySheetScrolls(snapshots, durationMs = 3500) {
+  if (!snapshots?.length) return;
+  const until = Date.now() + durationMs;
+  for (const snapshot of snapshots) {
+    if (snapshot.app && snapshot.position) snapshot.app._pf1PartyScrollLock = { position: snapshot.position, until };
+  }
+  restoreOpenPartySheetScrolls(snapshots);
+  const started = Date.now();
+  const timer = setInterval(() => {
+    restoreOpenPartySheetScrolls(snapshots);
+    if (Date.now() - started >= durationMs) clearInterval(timer);
+  }, 75);
+}
+
+function renderPartySheetPreservingScroll(app) {
+  const position = getPartySheetScrollLock(app) ?? capturePartySheetScroll(app);
+  app.render(false);
+  restorePartySheetScroll(app, position);
+  setTimeout(() => restorePartySheetScroll(app, position), 100);
+  setTimeout(() => restorePartySheetScroll(app, position), 300);
+  setTimeout(() => restorePartySheetScroll(app, position), 650);
+}
+
 function getHp(actor) {
   const value = firstNumber(actor, [
     "system.attributes.hp.value",
@@ -326,7 +825,8 @@ function getHp(actor) {
     "data.data.attributes.hp.max",
     "data.data.attributes.hp.total"
   ], value);
-  return { value, max };
+  const width = max > 0 ? `${clampNumber((value / max) * 100, 0, 100)}%` : "0%";
+  return { value, max, width };
 }
 
 function firstNumber(actor, paths, fallback = 0) {
@@ -541,10 +1041,11 @@ function collectSkills(actor) {
   const addSkill = (id, skill, parentLabel = "") => {
     if (!skill || typeof skill !== "object") return;
     const mod = getSkillBonusFromObject(skill);
+    const ranks = getSkillRanksFromObject(skill);
     const baseLabel = getSkillLabel(id, skill);
     const label = parentLabel && !baseLabel.includes(parentLabel) ? `${parentLabel}: ${baseLabel}` : baseLabel;
     if (Number.isFinite(mod)) {
-      result.push({ id, label: formatSkillLabel(label), bonus: mod, actorId: actor.id, actorName: actor.name });
+      result.push({ id, label: formatSkillLabel(label), bonus: mod, ranks, actorId: actor.id, actorName: actor.name });
     }
 
     const subSkills = skill.subSkills || skill.subskills || skill.children;
@@ -578,6 +1079,14 @@ function getSkillBonusFromObject(skill) {
   return 0;
 }
 
+function getSkillRanksFromObject(skill) {
+  for (const path of ["rank", "ranks", "points", "point", "rt", "baseRank", "baseRanks", "data.rank", "data.ranks"]) {
+    const value = gprop(skill, path);
+    if (value !== undefined && value !== null && value !== "") return Math.max(0, toNumber(value, 0));
+  }
+  return 0;
+}
+
 function getSkillLabel(id, skill) {
   const baseId = String(id || "").split(".")[0];
   if (baseId === "per") return "Внимание";
@@ -592,18 +1101,44 @@ function buildPartySkillSummaries(members) {
   for (const actor of members) {
     for (const skill of collectSkills(actor)) {
       const existing = byId.get(skill.id);
-      if (!existing || skill.bonus > existing.best) {
-        byId.set(skill.id, {
+      const entry = existing ?? {
           id: skill.id,
           label: skill.label,
-          best: skill.bonus,
+          best: -Infinity,
           bestActorId: actor.id,
-          bestActorName: actor.name
-        });
+          bestActorName: actor.name,
+          invested: false,
+          members: []
+        };
+      entry.members.push({
+        actorId: actor.id,
+        actorName: actor.name,
+        bonus: skill.bonus,
+        ranks: skill.ranks
+      });
+      entry.invested = entry.invested || skill.ranks > 0;
+      if (skill.bonus > entry.best) {
+        entry.best = skill.bonus;
+        entry.bestActorId = actor.id;
+        entry.bestActorName = actor.name;
       }
+      byId.set(skill.id, entry);
     }
   }
-  return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
+  return [...byId.values()]
+    .map(entry => {
+      const membersList = entry.members
+        .sort((a, b) => b.bonus - a.bonus || a.actorName.localeCompare(b.actorName, game.i18n.lang));
+      const tooltipHtml = `<div class="pf1-party-skill-tooltip">${membersList.map(member => `
+        <div><span>${escapeHTML(member.actorName)}:</span><b>${signed(member.bonus)}</b></div>`
+      ).join("")}</div>`;
+      return {
+        ...entry,
+        tooltip: membersList.map(member => `${member.actorName}: ${signed(member.bonus)}`).join("\n"),
+        tooltipHtml
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
 }
 
 function isKnowledgeSkill(skill) {
@@ -615,6 +1150,64 @@ function isKnowledgeSkill(skill) {
 
 function isPartyOverviewSkill(skill) {
   return !isKnowledgeSkill(skill);
+}
+
+function normalizedSkillText(skill) {
+  return normalizeDedupeKey(`${skill?.id || ""} ${skill?.label || ""}`);
+}
+
+function skillToneClass(skill) {
+  const best = toNumber(skill?.best, 0);
+  if (best > 30) return "is-legendary-burgundy";
+  if (best > 20) return "is-legendary-gold";
+  if (best > 10) return "is-master-purple";
+  if (best > 0) return "is-trained-blue";
+  if (best < 0) return "is-negative-red";
+  return "is-zero-gray";
+}
+
+function withSkillTone(skill) {
+  return { ...skill, toneClass: skillToneClass(skill) };
+}
+
+function isBackgroundPartySkill(skill) {
+  const text = normalizedSkillText(skill);
+  return [
+    "art", "artistry", "артистизм",
+    "han", "handle animal", "дрессировка",
+    "prf", "perform", "исполнение",
+    "slt", "sleight", "ловкость рук",
+    "apr", "appraise", "оценка",
+    "lor", "lore", "предания",
+    "pro", "profession", "профессия",
+    "crf", "craft", "ремесло",
+    "lin", "linguistics", "языкознание"
+  ].some(term => text.includes(normalizeDedupeKey(term)));
+}
+
+function isBackgroundKnowledgeSkill(skill) {
+  const id = String(skill?.id || "").split(".")[0];
+  const text = normalizedSkillText(skill);
+  return ["kno", "kge", "ken", "khi"].includes(id)
+    || text.includes("высший свет")
+    || text.includes("география")
+    || text.includes("инженерное дело")
+    || text.includes("история")
+    || text.includes("nobility")
+    || text.includes("geography")
+    || text.includes("engineering")
+    || text.includes("history");
+}
+
+function buildSkillGroups(skills, backgroundPredicate) {
+  const groups = [
+    { id: "adventure", label: "Приключенческие", items: [] },
+    { id: "background", label: "Фоновые", items: [] }
+  ];
+  for (const skill of skills.map(withSkillTone)) {
+    groups[backgroundPredicate(skill) ? 1 : 0].items.push(skill);
+  }
+  return groups.filter(group => group.items.length);
 }
 
 function readActorCurrency(actor, category = "currency") {
@@ -682,29 +1275,32 @@ function currencyToGp(currency) {
 }
 
 function getItemQuantity(itemData) {
-  return Math.max(0, toNumber(gprop(itemData, "system.quantity") ?? gprop(itemData, "system.qty") ?? gprop(itemData, "data.data.quantity") ?? 1, 1));
+  const legacyQuantity = isDocumentLike(itemData) ? undefined : gprop(itemData, "data.data.quantity");
+  return Math.max(0, toNumber(gprop(itemData, "system.quantity") ?? gprop(itemData, "system.qty") ?? legacyQuantity ?? 1, 1));
 }
 
 function setItemQuantity(itemData, quantity) {
   const value = Math.max(0, Math.floor(toNumber(quantity, 1)));
-  if (has(itemData, "system.quantity") || !has(itemData, "data.data.quantity")) sprop(itemData, "system.quantity", value);
+  if (has(itemData, "system.quantity") || isDocumentLike(itemData) || !has(itemData, "data.data.quantity")) sprop(itemData, "system.quantity", value);
   else sprop(itemData, "data.data.quantity", value);
   return itemData;
 }
 
 function getItemWeightEach(itemData) {
-  return Math.max(0, toNumber(gprop(itemData, "system.weight") ?? gprop(itemData, "system.weight.value") ?? gprop(itemData, "data.data.weight") ?? 0, 0));
+  const legacyWeight = isDocumentLike(itemData) ? undefined : gprop(itemData, "data.data.weight");
+  return Math.max(0, toNumber(gprop(itemData, "system.weight") ?? gprop(itemData, "system.weight.value") ?? legacyWeight ?? 0, 0));
 }
 
 function getItemPriceGpEach(itemData) {
-  const raw = gprop(itemData, "system.price") ?? gprop(itemData, "system.price.value") ?? gprop(itemData, "data.data.price") ?? 0;
+  const legacyPrice = isDocumentLike(itemData) ? undefined : gprop(itemData, "data.data.price");
+  const raw = gprop(itemData, "system.price") ?? gprop(itemData, "system.price.value") ?? legacyPrice ?? 0;
   return parsePriceToGp(raw);
 }
 
 function setItemPriceGpEach(itemData, priceGp) {
   const value = Math.max(0, toNumber(priceGp, 0));
   if (has(itemData, "system.price.value")) sprop(itemData, "system.price.value", value);
-  else if (has(itemData, "data.data.price")) sprop(itemData, "data.data.price", value);
+  else if (!isDocumentLike(itemData) && has(itemData, "data.data.price")) sprop(itemData, "data.data.price", value);
   else sprop(itemData, "system.price", value);
   return itemData;
 }
@@ -712,9 +1308,19 @@ function setItemPriceGpEach(itemData, priceGp) {
 function setItemWeightEach(itemData, weight) {
   const value = Math.max(0, toNumber(weight, 0));
   if (has(itemData, "system.weight.value")) sprop(itemData, "system.weight.value", value);
-  else if (has(itemData, "data.data.weight")) sprop(itemData, "data.data.weight", value);
+  else if (!isDocumentLike(itemData) && has(itemData, "data.data.weight")) sprop(itemData, "data.data.weight", value);
   else sprop(itemData, "system.weight", value);
   return itemData;
+}
+
+function isDocumentLike(value) {
+  return Boolean(value && typeof value === "object" && typeof value.toObject === "function");
+}
+
+function getItemSourceData(item) {
+  if (!item) return {};
+  if (typeof item.toObject === "function") return item.toObject(false);
+  return item;
 }
 
 function parsePriceToGp(raw) {
@@ -757,7 +1363,7 @@ function getActorItemValueGp(actor) {
 
   let itemsGp = 0;
   for (const item of getActorInventoryItems(actor)) {
-    const data = item.toObject ? item.toObject() : item;
+    const data = getItemSourceData(item);
     const quantity = getItemQuantity(data);
     itemsGp += getItemPriceGpEach(data) * quantity;
   }
@@ -777,7 +1383,7 @@ function getActorCarriedWeight(actor) {
 
   let weight = 0;
   for (const item of getActorInventoryItems(actor)) {
-    const data = item.toObject ? item.toObject() : item;
+    const data = getItemSourceData(item);
     const quantity = getItemQuantity(data);
     weight += getItemWeightEach(data) * quantity;
   }
@@ -799,6 +1405,7 @@ function normalizeItemForStash(item) {
   const data = item.toObject ? item.toObject() : deepClone(item);
   delete data._id;
   data._id = foundry.utils.randomID();
+  ensureItemSourceBasics(data, item);
   const quantity = getItemQuantity(data);
   return {
     stashId: foundry.utils.randomID(),
@@ -832,16 +1439,475 @@ function getStashItemView(stashItem) {
     weightEach: fmtNumber(weightEach),
     priceGp: fmtNumber(priceTotal),
     priceEach: fmtNumber(priceEach),
+    description: getItemDescriptionHTML(data).trim(),
     search: `${stashItem.name || data.name || ""} ${stashItem.type || data.type || ""}`.toLowerCase()
   };
 }
 
 function getStashItemSource(stashItem) {
   const source = deepClone(stashItem?.stashId && stashItem?.data ? stashItem.data : stashItem ?? {});
-  source._id = source._id || foundry.utils.randomID();
-  source.name = source.name || stashItem?.name || "Предмет";
-  source.type = source.type || stashItem?.type || "loot";
-  source.img = source.img || stashItem?.img || "icons/svg/item-bag.svg";
+  ensureItemSourceBasics(source, stashItem);
+  return source;
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function firstValidItemType(...values) {
+  for (const value of values) {
+    const type = String(value ?? "").trim();
+    if (type && type.toLowerCase() !== "item") return type;
+  }
+  return "loot";
+}
+
+function ensureItemSourceBasics(source, fallback = {}) {
+  if (!source || typeof source !== "object") return source;
+  const nestedData = source.data && typeof source.data === "object" ? source.data : {};
+  source._id = source._id || fallback?._id || fallback?.id || foundry.utils.randomID();
+  source.name = firstNonEmptyString(
+    source.name,
+    fallback?.name,
+    nestedData.name,
+    gprop(source, "item.name"),
+    gprop(fallback, "data.name"),
+    "Предмет"
+  );
+  source.type = firstValidItemType(
+    source.type,
+    fallback?.type,
+    nestedData.type,
+    gprop(source, "item.type"),
+    gprop(fallback, "data.type")
+  );
+  source.img = firstNonEmptyString(
+    source.img,
+    fallback?.img,
+    nestedData.img,
+    gprop(source, "item.img"),
+    gprop(fallback, "data.img"),
+    "icons/svg/item-bag.svg"
+  );
+  if (!source.system || typeof source.system !== "object") source.system = {};
+  return source;
+}
+
+function arrayFromMaybeObject(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Map || (typeof Collection !== "undefined" && value instanceof Collection)) return Array.from(value.values());
+  if (Array.isArray(value?.contents)) return value.contents;
+  if (value && typeof value === "object") return Object.values(value);
+  return [];
+}
+
+function normalizeContainerInventoryItems(value) {
+  return arrayFromMaybeObject(value)
+    .map(item => {
+      if (!item) return null;
+      const source = item.toObject ? item.toObject() : deepClone(item);
+      if (!source || typeof source !== "object") return null;
+      ensureItemSourceBasics(source, item);
+      const legacySystem = gprop(source, "data.data");
+      source.system = mergeObject(
+        legacySystem && typeof legacySystem === "object" ? deepClone(legacySystem) : {},
+        source.system && typeof source.system === "object" ? source.system : {},
+        { inplace: false }
+      );
+      source.system.description = source.system.description ?? { value: getItemDescriptionHTML(source) };
+      if (typeof source.system.description === "string") source.system.description = { value: source.system.description };
+      source.system.actions = arrayFromMaybeObject(source.system.actions);
+      source.system.changes = arrayFromMaybeObject(source.system.changes);
+      source.system.contextNotes = arrayFromMaybeObject(source.system.contextNotes);
+      source.system.links = arrayFromMaybeObject(source.system.links);
+      normalizeContainerSystem(source);
+      delete source.data;
+      return source;
+    })
+    .filter(Boolean);
+}
+
+function normalizeContainerSystem(source) {
+  if (source.type !== "container" && source.system.inventoryItems == null) return;
+  source.system.inventoryItems = normalizeContainerInventoryItems(source.system.inventoryItems);
+  const currency = source.system.currency && typeof source.system.currency === "object" ? source.system.currency : {};
+  source.system.currency = {
+    pp: toNumber(currency.pp, 0),
+    gp: toNumber(currency.gp, 0),
+    sp: toNumber(currency.sp, 0),
+    cp: toNumber(currency.cp, 0)
+  };
+  source.system.weightReduction = toNumber(source.system.weightReduction, 0);
+  source.system.maxWeight ??= null;
+  source.system.sellMultiplier ??= 0.5;
+}
+
+function parseDropDataTransfer(event) {
+  const nativeEvent = event?.originalEvent ?? event;
+  const dataTransfer = nativeEvent?.dataTransfer;
+  if (!dataTransfer) return null;
+  for (const type of ["text/plain", "application/json"]) {
+    const raw = dataTransfer.getData(type);
+    if (!raw) continue;
+    try {
+      const data = JSON.parse(raw);
+      if (data && typeof data === "object") return data;
+    } catch (err) {
+      console.debug(`${MODULE_ID} | Could not parse ${type} drop payload`, err);
+    }
+  }
+  return null;
+}
+
+function getPartyDropData(event) {
+  const rawData = parseDropDataTransfer(event);
+  let editorData = null;
+  try {
+    editorData = TextEditor.getDragEventData(event);
+  } catch (err) {
+    console.debug(`${MODULE_ID} | Could not read Foundry drop data`, err);
+  }
+  if (rawData && editorData) return mergeObject(editorData, rawData, { inplace: false });
+  return rawData ?? editorData;
+}
+
+function normalizeStashDropData(data) {
+  if (!data || typeof data !== "object") return data;
+  const normalized = mergeObject({}, data, { inplace: false });
+  normalized.containerId ??= gprop(normalized, "data.containerId") ?? gprop(normalized, "item.containerId");
+  normalized.containerUuid ??= gprop(normalized, "data.containerUuid") ?? gprop(normalized, "item.containerUuid");
+  normalized.itemId ??= gprop(normalized, "data._id") ?? gprop(normalized, "data.id") ?? gprop(normalized, "item._id") ?? gprop(normalized, "item.id");
+  return normalized;
+}
+
+function getDocumentIdentityValues(document) {
+  return [
+    document?.id,
+    document?._id,
+    document?.uuid,
+    document?.document?.id,
+    document?.document?._id,
+    document?.document?.uuid,
+    gprop(document, "data._id"),
+    gprop(document, "_source._id")
+  ].filter(value => value !== null && value !== undefined && String(value).trim() !== "");
+}
+
+function registerOpenStashItemSource(item, partyActor, stashId) {
+  if (!item || !partyActor?.id || !stashId) return;
+  const value = { partyActorId: partyActor.id, stashId, item };
+  for (const key of new Set([...getDocumentIdentityValues(item), stashId])) {
+    openStashItemSources.set(String(key), value);
+  }
+}
+
+function unregisterOpenStashItemSource(item) {
+  if (!item) return;
+  const ref = getOpenStashItemReference(item);
+  for (const key of getDocumentIdentityValues(item)) openStashItemSources.delete(String(key));
+  if (ref?.stashId) openStashItemSources.delete(String(ref.stashId));
+}
+
+function getOpenStashContainerReference(data) {
+  const candidates = [
+    data?.containerId,
+    data?.containerUuid,
+    data?.uuid,
+    gprop(data, "data.containerId"),
+    gprop(data, "data.containerUuid"),
+    gprop(data, "data._id"),
+    gprop(data, "_id")
+  ].filter(value => value !== null && value !== undefined && String(value).trim() !== "");
+  for (const candidate of candidates) {
+    const ref = openStashItemSources.get(String(candidate));
+    if (ref) return ref;
+  }
+  return null;
+}
+
+function getOpenStashItemReference(item) {
+  if (!item) return null;
+  for (const key of getDocumentIdentityValues(item)) {
+    const ref = openStashItemSources.get(String(key));
+    if (ref) return ref;
+  }
+  return null;
+}
+
+function getStashContainerContentSource(ref, itemId) {
+  if (!ref?.partyActorId || !ref?.stashId || !itemId) return null;
+  const party = game.actors.get(ref.partyActorId);
+  if (!party) return null;
+  const stash = getStash(party);
+  const entry = stash.items.find(item => item.stashId === ref.stashId);
+  if (!entry) return null;
+  const containerSource = prepareStashItemSourceForPF1Sheet(entry);
+  const inventory = arrayFromMaybeObject(containerSource.system?.inventoryItems);
+  const itemSource = inventory.find(item => item?._id === itemId || item?.id === itemId);
+  if (!itemSource) return null;
+  return {
+    party,
+    stashId: ref.stashId,
+    containerSource,
+    itemSource: ensureItemSourceBasics(deepClone(itemSource))
+  };
+}
+
+async function deleteStashContainerContent(data) {
+  const ref = getOpenStashContainerReference(data);
+  const itemId = data?.itemId || gprop(data, "data._id");
+  const context = getStashContainerContentSource(ref, itemId);
+  if (!context) return false;
+  const inventory = arrayFromMaybeObject(context.containerSource.system?.inventoryItems);
+  const nextInventory = inventory.filter(item => item?._id !== itemId && item?.id !== itemId);
+  if (nextInventory.length === inventory.length) return false;
+  context.containerSource.system.inventoryItems = nextInventory;
+  await updateStashItemSource(context.party, context.stashId, context.containerSource);
+  const tempItem = ref?.item;
+  if (tempItem) {
+    tempItem.updateSource?.({ "system.inventoryItems": nextInventory });
+    tempItem.prepareData?.();
+    for (const app of Object.values(tempItem.apps ?? {})) app.render(false);
+  }
+  return true;
+}
+
+function getStashContainerMoveContext(partyActor, data) {
+  const ref = getOpenStashContainerReference(data);
+  const itemId = data?.itemId || gprop(data, "data._id") || gprop(data, "_id");
+  if (!partyActor?.id || !ref?.stashId || !itemId || ref.partyActorId !== partyActor.id) return null;
+  const stash = getStash(partyActor);
+  const containerIndex = stash.items.findIndex(item => item.stashId === ref.stashId);
+  if (containerIndex < 0) return null;
+  const containerSource = prepareStashItemSourceForPF1Sheet(stash.items[containerIndex]);
+  const inventory = arrayFromMaybeObject(containerSource.system?.inventoryItems);
+  const itemIndex = inventory.findIndex(item => item?._id === itemId || item?.id === itemId);
+  if (itemIndex < 0) return null;
+  const itemSource = ensureItemSourceBasics(deepClone(inventory[itemIndex]));
+  return { ref, itemId, stash, containerIndex, containerSource, inventory, itemIndex, itemSource };
+}
+
+async function moveStashContainerContentToPartyStash(partyActor, data, event) {
+  if (event?.ctrlKey) return false;
+  const context = getStashContainerMoveContext(partyActor, data);
+  if (!context) return false;
+  const nextInventory = context.inventory.filter((_, index) => index !== context.itemIndex);
+  context.containerSource.system.inventoryItems = nextInventory;
+  context.stash.items[context.containerIndex] = buildStashItemEntry(context.stash.items[context.containerIndex], context.containerSource);
+  context.stash.items.push(normalizeItemForStash(context.itemSource));
+  await setStash(partyActor, context.stash);
+
+  const tempItem = context.ref?.item;
+  if (tempItem) {
+    tempItem.updateSource?.({ "system.inventoryItems": nextInventory });
+    tempItem.prepareData?.();
+    for (const app of Object.values(tempItem.apps ?? {})) app.render(false);
+  }
+  await renderOpenPartySheets();
+  return true;
+}
+
+async function getActorFromDropData(data) {
+  let source = null;
+  if (data?.actorUuid) {
+    try {
+      source = await fromUuid(data.actorUuid);
+    } catch (err) {
+      console.debug(`${MODULE_ID} | Could not resolve dropped item actor`, err);
+    }
+  }
+  if (source?.documentName === "Actor") return source;
+  if (source?.actor?.documentName === "Actor") return source.actor;
+  if (data?.actorId) return game.actors.get(data.actorId) ?? null;
+  return null;
+}
+
+async function getDroppedContainerContent(data) {
+  if (!data?.containerId || !data?.itemId) return null;
+  const stashContext = getStashContainerContentSource(getOpenStashContainerReference(data), data.itemId);
+  if (stashContext?.itemSource) return stashContext.itemSource;
+  const actor = await getActorFromDropData(data);
+  if (!actor) return null;
+  return actor.containerItems?.find(item => item.id === data.itemId && item.parentItem?.id === data.containerId)
+    ?? actor.items?.get(data.containerId)?.getContainerContent?.(data.itemId)
+    ?? null;
+}
+
+async function deleteDroppedContainerContent(data) {
+  if (!data?.containerId || !data?.itemId) return false;
+  if (await deleteStashContainerContent(data)) return true;
+  const actor = await getActorFromDropData(data);
+  const container = actor?.items?.get(data.containerId)
+    ?? actor?.containerItems?.find(item => item.id === data.itemId && item.parentItem?.id === data.containerId)?.parentItem
+    ?? null;
+  if (!container) return false;
+  const canDelete = container.isOwner
+    || actor?.isOwner
+    || container.testUserPermission?.(game.user, "OWNER")
+    || container.testUserPermission?.(game.user, 3)
+    || actor?.testUserPermission?.(game.user, "OWNER")
+    || actor?.testUserPermission?.(game.user, 3)
+    || false;
+  if (!canDelete) return false;
+  if (typeof container.deleteContainerContent === "function") {
+    await container.deleteContainerContent(data.itemId);
+    return true;
+  }
+  const inventory = deepClone(container.system?.inventoryItems ?? []);
+  const nextInventory = inventory.filter(item => item?._id !== data.itemId);
+  if (nextInventory.length === inventory.length) return false;
+  await container.update({ "system.inventoryItems": nextInventory });
+  return true;
+}
+
+async function deleteMovedSourceItem(item, event, dropData = null) {
+  if (event?.ctrlKey) return true;
+  if (dropData?.containerId && dropData?.itemId) {
+    try {
+      if (await deleteDroppedContainerContent(dropData)) return true;
+    } catch (err) {
+      console.warn(`${MODULE_ID} | Could not delete dropped container content`, err);
+      return false;
+    }
+  }
+  if (!item) return false;
+  if (item.parentItem?.id && typeof item.parentItem.deleteContainerContent === "function") {
+    const canDelete = item.parentItem.isOwner
+      || item.parentItem.testUserPermission?.(game.user, "OWNER")
+      || item.parentItem.testUserPermission?.(game.user, 3)
+      || false;
+    if (canDelete) {
+      try {
+        await item.parentItem.deleteContainerContent(item.id);
+        return true;
+      } catch (err) {
+        console.warn(`${MODULE_ID} | Could not delete moved source container content`, err);
+        return false;
+      }
+    }
+  }
+
+  const parent = item.parent;
+  const parentType = parent?.documentName;
+  if (!["Actor", "Item"].includes(parentType)) return true;
+
+  const canDelete = item.testUserPermission
+    ? item.testUserPermission(game.user, "OWNER")
+    : parent.testUserPermission?.(game.user, "OWNER");
+  if (!canDelete) return false;
+
+  try {
+    if (typeof item.delete === "function") await item.delete();
+    else if (item.id && typeof parent.deleteEmbeddedDocuments === "function") await parent.deleteEmbeddedDocuments(item.documentName ?? "Item", [item.id]);
+    return true;
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Could not delete moved source item`, err);
+    ui.notifications.warn("Предмет добавлен в тайник, но исходный предмет не удалось удалить из контейнера.");
+    return false;
+  }
+}
+
+async function storeDroppedItemInPartyStash(partyActor, data, event) {
+  data = normalizeStashDropData(data);
+  if (!partyActor || data?.type !== "Item") return false;
+  const transfer = gprop(data, `data.flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`) ?? gprop(data, `flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`);
+  if (transfer?.partyActorId === partyActor.id && !data?.containerId && !data?.itemId) return true;
+
+  if (data?.containerId && data?.itemId && await moveStashContainerContentToPartyStash(partyActor, data, event)) return true;
+
+  const containedItem = data?.containerId && data?.itemId ? await getDroppedContainerContent(data) : null;
+  const item = containedItem ?? (data.uuid ? await fromUuid(data.uuid) : null);
+  const itemSource = item ?? data.data;
+  if (!itemSource) {
+    ui.notifications.warn("Не удалось прочитать предмет.");
+    return false;
+  }
+
+  const sourceData = itemSource.toObject ? itemSource.toObject() : itemSource;
+  const sourceType = String(sourceData.type || "").toLowerCase();
+  const stashSource = sourceType === "spell" ? await createItemFromDroppedSpell(itemSource) : itemSource;
+  if (!stashSource) return false;
+
+  const stash = getStash(partyActor);
+  const stashItem = normalizeItemForStash(stashSource);
+  stash.items.push(stashItem);
+  await setStash(partyActor, stash);
+
+  const deletedSource = await deleteMovedSourceItem(sourceType === "spell" ? null : item, event, data);
+  if (data?.containerId && !deletedSource && !event?.ctrlKey) {
+    const rollbackStash = getStash(partyActor);
+    rollbackStash.items = rollbackStash.items.filter(i => i.stashId !== stashItem.stashId);
+    await setStash(partyActor, rollbackStash);
+    ui.notifications.warn("Не удалось перенести предмет: PF1e не дал удалить его из контейнера.");
+    return false;
+  }
+
+  await renderOpenPartySheets();
+  return true;
+}
+
+function buildStashContainerDropPayload(ref, itemId) {
+  const context = getStashContainerContentSource(ref, itemId);
+  if (!context?.itemSource) return null;
+  return {
+    type: "Item",
+    actorUuid: context.party.uuid,
+    actorId: context.party.id,
+    containerId: ref.item?.id ?? ref.item?._id ?? ref.stashId,
+    itemId,
+    data: context.itemSource
+  };
+}
+
+function writeDragData(dataTransfer, payload) {
+  if (!dataTransfer || !payload) return false;
+  const serialized = JSON.stringify(payload);
+  dataTransfer.setData("text/plain", serialized);
+  dataTransfer.setData("application/json", serialized);
+  dataTransfer.effectAllowed = "move";
+  return true;
+}
+
+function injectStashContainerSheetDragData(app, html) {
+  const item = app?.object ?? app?.document;
+  const ref = getOpenStashItemReference(item);
+  if (!ref) return;
+  const jq = html?.jquery ? html : $(html ?? app?.element);
+  if (!jq?.length) return;
+  jq.find("[data-item-id]").attr("draggable", "true");
+  jq.off("dragstart.pf1PartyStashContainer", "[data-item-id]");
+  jq.on("dragstart.pf1PartyStashContainer", "[data-item-id]", event => {
+    const nativeEvent = event.originalEvent ?? event;
+    const itemId = event.currentTarget?.dataset?.itemId || event.currentTarget?.getAttribute?.("data-item-id");
+    const payload = buildStashContainerDropPayload(ref, itemId);
+    if (!payload) return;
+    writeDragData(nativeEvent.dataTransfer, payload);
+  });
+}
+
+function prepareStashItemSourceForPF1Sheet(stashItem) {
+  const source = getStashItemSource(stashItem);
+  const legacySystem = gprop(source, "data.data");
+  source.system = mergeObject(
+    legacySystem && typeof legacySystem === "object" ? deepClone(legacySystem) : {},
+    source.system && typeof source.system === "object" ? source.system : {},
+    { inplace: false }
+  );
+  source.system.description = source.system.description ?? { value: getItemDescriptionHTML(source) };
+  if (typeof source.system.description === "string") source.system.description = { value: source.system.description };
+  source.system.quantity = getItemQuantity(source);
+  source.system.weight = getItemWeightEach(source);
+  source.system.price = getItemPriceGpEach(source);
+  source.system.actions = arrayFromMaybeObject(source.system.actions);
+  source.system.changes = arrayFromMaybeObject(source.system.changes);
+  source.system.contextNotes = arrayFromMaybeObject(source.system.contextNotes);
+  source.system.links = arrayFromMaybeObject(source.system.links);
+  normalizeContainerSystem(source);
+  delete source.data;
   return source;
 }
 
@@ -870,6 +1936,72 @@ function buildStashItemEntry(oldEntry, itemSource) {
   };
 }
 
+function defaultStashItemSource(category = "equipment") {
+  const base = {
+    name: "Новый предмет",
+    type: "loot",
+    img: "icons/svg/item-bag.svg",
+    system: {
+      quantity: 1,
+      price: 0,
+      weight: 0,
+      description: { value: "" }
+    }
+  };
+  const setKind = (path, value) => sprop(base, path, value);
+
+  switch (category) {
+    case "weapons":
+      base.name = "Новое оружие";
+      base.type = "weapon";
+      base.img = "icons/svg/sword.svg";
+      break;
+    case "armor":
+      base.name = "Новая броня";
+      base.type = "equipment";
+      base.img = "icons/svg/shield.svg";
+      setKind("system.equipmentType", "armor");
+      setKind("system.subType", "armor");
+      break;
+    case "consumables":
+      base.name = "Новый расходник";
+      base.type = "consumable";
+      base.img = "icons/svg/potion.svg";
+      setKind("system.consumableType", "potion");
+      setKind("system.subType", "potion");
+      break;
+    case "ammo":
+      base.name = "Новые боеприпасы";
+      base.type = "loot";
+      base.img = "icons/svg/acid.svg";
+      setKind("system.subType", "ammo");
+      break;
+    case "goods":
+      base.name = "Новый товар";
+      base.type = "loot";
+      setKind("system.subType", "tradegoods");
+      break;
+    case "misc":
+      base.name = "Новый предмет";
+      base.type = "loot";
+      setKind("system.subType", "misc");
+      break;
+    case "containers":
+      base.name = "Новый контейнер";
+      base.type = "container";
+      base.img = "icons/containers/bags/pack-leather-white-tan.webp";
+      break;
+    case "equipment":
+    default:
+      base.name = "Новое снаряжение";
+      base.type = "equipment";
+      setKind("system.equipmentType", "gear");
+      setKind("system.subType", "gear");
+      break;
+  }
+  return base;
+}
+
 async function updateStashItemSource(partyActor, stashId, itemSource) {
   const stash = getStash(partyActor);
   const index = stash.items.findIndex(i => i.stashId === stashId);
@@ -877,73 +2009,6 @@ async function updateStashItemSource(partyActor, stashId, itemSource) {
   stash.items[index] = buildStashItemEntry(stash.items[index], itemSource);
   await setStash(partyActor, stash);
   return stash.items[index];
-}
-
-function itemSourceFromFallbackForm(itemSource, form) {
-  const data = new FormData(form);
-  const source = getStashItemSource(itemSource);
-  source.name = String(data.get("name") || source.name || "Предмет").trim() || "Предмет";
-  source.type = String(data.get("type") || source.type || "loot").trim() || "loot";
-  source.img = String(data.get("img") || source.img || "icons/svg/item-bag.svg").trim() || "icons/svg/item-bag.svg";
-  source.system = source.system || {};
-  sprop(source, "system.quantity", Math.max(0, Math.floor(toNumber(data.get("quantity"), 1))));
-  sprop(source, "system.price", toNumber(data.get("price"), 0));
-  sprop(source, "system.weight", toNumber(data.get("weight"), 0));
-  sprop(source, "system.description.value", String(data.get("description") || ""));
-  return source;
-}
-
-function renderStashItemFallbackDialog(partyActor, stashId, stashItem, itemSource, { editable = false } = {}) {
-  const description = getItemDescriptionHTML(itemSource).trim() || "<em>Описание не заполнено.</em>";
-  const quantity = getItemQuantity(itemSource);
-  const price = fmtNumber(getItemPriceGpEach(itemSource));
-  const weight = fmtNumber(getItemWeightEach(itemSource));
-  const content = editable ? `
-    <form class="pf1-party-dialog pf1-stash-item-dialog">
-      <div class="pf1-stash-item-dialog-head">
-        <img src="${escapeHTML(itemSource.img || stashItem.img || "icons/svg/item-bag.svg")}" alt="">
-        <div>
-          <h3>${escapeHTML(itemSource.name || stashItem.name || "Предмет")}</h3>
-          <p>Запасной редактор предмета тайника</p>
-        </div>
-      </div>
-      <div class="form-group"><label>Название</label><input type="text" name="name" value="${escapeHTML(itemSource.name || stashItem.name || "Предмет")}"></div>
-      <div class="form-group"><label>Тип PF1</label><input type="text" name="type" value="${escapeHTML(itemSource.type || stashItem.type || "loot")}"></div>
-      <div class="form-group"><label>Картинка</label><input type="text" name="img" value="${escapeHTML(itemSource.img || stashItem.img || "icons/svg/item-bag.svg")}"></div>
-      <div class="form-group"><label>Количество</label><input type="number" name="quantity" value="${quantity}" min="0" step="1"></div>
-      <div class="form-group"><label>Цена за штуку, зм</label><input type="number" name="price" value="${price}" min="0" step="0.01"></div>
-      <div class="form-group"><label>Вес за штуку, фнт.</label><input type="number" name="weight" value="${weight}" min="0" step="0.01"></div>
-      <div class="form-group stacked"><label>Описание</label><textarea name="description" rows="8">${escapeHTML(getItemDescriptionHTML(itemSource))}</textarea></div>
-    </form>` : `
-    <article class="pf1-party-dialog pf1-stash-item-dialog">
-      <div class="pf1-stash-item-dialog-head">
-        <img src="${escapeHTML(itemSource.img || stashItem.img || "icons/svg/item-bag.svg")}" alt="">
-        <div>
-          <h3>${escapeHTML(itemSource.name || stashItem.name || "Предмет")}</h3>
-          <p>${escapeHTML(itemSource.type || stashItem.type || "loot")} · ${quantity} шт. · ${fmtNumber(getItemPriceGpEach(itemSource) * quantity)} зм · ${fmtNumber(getItemWeightEach(itemSource) * quantity)} фнт.</p>
-        </div>
-      </div>
-      <div class="pf1-stash-item-dialog-description">${description}</div>
-    </article>`;
-
-  new Dialog({
-    title: itemSource.name || stashItem.name || "Предмет",
-    content,
-    buttons: editable ? {
-      save: {
-        label: "Сохранить",
-        callback: async html => {
-          const form = html.find("form")[0];
-          if (!form) return;
-          const source = itemSourceFromFallbackForm(itemSource, form);
-          await updateStashItemSource(partyActor, stashId, source);
-          renderOpenPartySheets();
-        }
-      },
-      close: { label: "Отмена" }
-    } : { close: { label: "Закрыть" } },
-    default: editable ? "save" : "close"
-  }).render(true);
 }
 
 function categoryForItem(item) {
@@ -958,7 +2023,6 @@ function categoryForItem(item) {
   ).toLocaleLowerCase(game.i18n?.lang || "ru");
 
   if (type === "weapon") return "weapons";
-  if (type === "equipment") return "armor";
   if (type === "consumable") return "consumables";
   if (type === "container") return "containers";
   if (type === "loot") {
@@ -988,6 +2052,11 @@ function categoryForItem(item) {
     gprop(data, "data.data.type.value"),
     gprop(data, "data.data.type.label")
   ].flatMap(parseTextList).join(" ").toLocaleLowerCase(game.i18n?.lang || "ru");
+  if (type === "equipment") {
+    if (directKind.includes("armor") || directKind.includes("Р±СЂРѕРЅ") || directKind.includes("РґРѕСЃРїРµС…") || directKind.includes("shield") || directKind.includes("С‰РёС‚")) return "armor";
+    if (directKind.includes("trade good") || directKind.includes("goods") || directKind.includes("С‚РѕРІР°СЂ")) return "goods";
+    return "equipment";
+  }
   const text = [
     name,
     type,
@@ -1108,18 +2177,23 @@ function buildTravel(members) {
   };
 }
 
-function actorSummary(actor, activities = {}) {
+function actorSummary(actor, activities = {}, heroPoints = {}) {
   const skills = collectSkills(actor);
   const activity = activities[actor.id] ?? {};
   const activitySkill = skills.find(s => s.id === activity.skillId);
+  const investedSkills = skills
+    .filter(skill => skill.id !== "per" && !isKnowledgeSkill(skill) && skill.ranks > 0)
+    .sort((a, b) => b.bonus - a.bonus || a.label.localeCompare(b.label, game.i18n.lang));
   return {
     id: actor.id,
     name: actor.name,
     img: actor.img || PARTY_ICON,
+    heroPoints: getHeroPointState(heroPoints, actor.id),
     hp: getHp(actor),
     ac: getAc(actor),
     saves: getSaves(actor),
     perception: getSkillBonus(actor, "per"),
+    investedSkills,
     senses: getSenses(actor),
     speed: getSpeed(actor),
     wealth: getActorWealth(actor),
@@ -1133,11 +2207,11 @@ function actorSummary(actor, activities = {}) {
   };
 }
 
-function buildPartyStatsData(members, activities, stash) {
+function buildPartyStatsData(members, activities, stash, heroPoints = {}) {
   const skills = buildPartySkillSummaries(members);
   const languages = [...new Set(members.flatMap(getLanguages))].sort((a, b) => a.localeCompare(b, game.i18n.lang));
   return {
-    members: members.map(actor => actorSummary(actor, activities)),
+    members: members.map(actor => actorSummary(actor, activities, heroPoints)),
     languages,
     skills,
     travel: buildTravel(members),
@@ -1153,25 +2227,54 @@ async function refreshPublicPartySnapshot(partyActor = getPartyActor()) {
   if (!game.user.isGM || !partyActor?.isOwner) return null;
   const activities = partyActor.getFlag(MODULE_ID, ACTIVITIES_FLAG) ?? {};
   const stash = getStash(partyActor);
+  const heroPoints = getHeroPoints(partyActor);
   const members = getPartyMembers(partyActor, { ignorePermissions: true });
-  const snapshot = buildPartyStatsData(members, activities, stash);
+  const snapshot = buildPartyStatsData(members, activities, stash, heroPoints);
   const current = getPublicPartySnapshot(partyActor);
   if (JSON.stringify(current) !== JSON.stringify(snapshot)) await partyActor.setFlag(MODULE_ID, PUBLIC_SNAPSHOT_FLAG, snapshot);
   return snapshot;
 }
 
-async function rollSkill(actor, skillId, { flavor = null, extraBonus = 0, dc = null } = {}) {
+function schedulePublicPartySnapshotRefresh(partyActor = getPartyActor()) {
+  if (!game.user.isGM || !partyActor?.isOwner) return;
+  if (publicSnapshotRefreshTimer) clearTimeout(publicSnapshotRefreshTimer);
+  const partyId = partyActor.id;
+  publicSnapshotRefreshTimer = setTimeout(() => {
+    publicSnapshotRefreshTimer = null;
+    const party = game.actors.get(partyId);
+    refreshPublicPartySnapshot(party).catch(err => console.warn(`${MODULE_ID} | Public party snapshot refresh failed`, err));
+  }, 150);
+}
+
+async function rollSkill(actor, skillId, { flavor = null, extraBonus = 0, dc = null, heroPointBonus = 0, partyActor = null } = {}) {
   if (!actor) return;
-  if (typeof actor.rollSkill === "function" && !extraBonus && !dc) {
+  const heroBonus = toNumber(heroPointBonus, 0);
+  const party = partyActor ?? getPartyActor();
+  if (heroBonus > 0) {
+    const spent = await spendHeroPoint(party, actor.id);
+    if (!spent) return null;
+  }
+  if (typeof actor.rollSkill === "function" && !extraBonus && !dc && !heroBonus) {
     return actor.rollSkill(skillId, { event: null });
   }
-  const bonus = getSkillBonus(actor, skillId) + toNumber(extraBonus, 0);
-  const roll = await new Roll(`1d20 + ${bonus}`).roll({ async: true });
+  const bonus = getSkillBonus(actor, skillId) + toNumber(extraBonus, 0) + heroBonus;
+  const formula = bonus >= 0 ? `1d20 + ${bonus}` : `1d20 - ${Math.abs(bonus)}`;
+  const roll = await new Roll(formula).roll({ async: true });
   const total = roll.total;
   const dcText = dc ? `; СЛ ${dc}${total >= dc ? " — успех" : " — провал"}` : "";
+  const heroText = heroBonus > 0 ? " (+8 геройское очко)" : "";
   await roll.toMessage({
     speaker: ChatMessage.getSpeaker({ actor }),
-    flavor: flavor || `Проверка навыка: ${skillId}${dcText}`
+    flavor: flavor ? `${flavor}${heroText}${dcText}` : `Проверка навыка: ${skillId}${heroText}${dcText}`,
+    flags: {
+      [MODULE_ID]: {
+        actorId: actor.id,
+        partyActorId: party?.id ?? null,
+        skillId,
+        heroPointPreBonusUsed: heroBonus > 0,
+        heroPointChatBonusUsed: false
+      }
+    }
   });
 }
 
@@ -1545,6 +2648,22 @@ class PF1PartyActorSheet extends ActorSheet {
     return this.actor.name || "The Party";
   }
 
+  _renderPreservingScroll() {
+    renderPartySheetPreservingScroll(this);
+  }
+
+  async _render(force = false, options = {}) {
+    const position = getPartySheetScrollLock(this) ?? capturePartySheetScroll(this);
+    const result = await super._render(force, options);
+    if (position) {
+      this._pf1PartyScrollLock = { position, until: Date.now() + 2500 };
+      restorePartySheetScroll(this, position);
+      setTimeout(() => restorePartySheetScroll(this, position), 75);
+      setTimeout(() => restorePartySheetScroll(this, position), 250);
+    }
+    return result;
+  }
+
   _withPendingStashQuantities(stash) {
     const nextStash = deepClone(stash);
     for (const [stashId, quantity] of this._stashQuantityState) {
@@ -1562,11 +2681,14 @@ class PF1PartyActorSheet extends ActorSheet {
     const members = getPartyMembers(this.actor);
     const activities = this.actor.getFlag(MODULE_ID, ACTIVITIES_FLAG) ?? {};
     const stash = this._withPendingStashQuantities(getStash(this.actor));
+    const heroPoints = getHeroPoints(this.actor);
     const metagame = mergeObject(defaultMetagameSettings(), this.actor.getFlag(MODULE_ID, METAGAME_FLAG) ?? {}, { inplace: false });
-    const liveStats = buildPartyStatsData(members, activities, stash);
-    if (game.user.isGM) await refreshPublicPartySnapshot(this.actor);
+    const liveStats = buildPartyStatsData(members, activities, stash, heroPoints);
+    if (game.user.isGM && !getPublicPartySnapshot(this.actor)) schedulePublicPartySnapshotRefresh(this.actor);
     const publicStats = getPublicPartySnapshot(this.actor);
     const stats = !game.user.isGM && metagame.showPartyStats && publicStats?.members?.length ? publicStats : liveStats;
+    const skills = stats.skills.filter(isPartyOverviewSkill).map(withSkillTone);
+    const knowledgeSkills = stats.skills.filter(isKnowledgeSkill).map(withSkillTone);
 
     return mergeObject(data, {
       party: {
@@ -1575,13 +2697,16 @@ class PF1PartyActorSheet extends ActorSheet {
         name: this.actor.name,
         img: this.actor.img || PARTY_ICON,
         tokenImg: gprop(this.actor, "prototypeToken.texture.src") || this.actor.img || PARTY_ICON,
-        permissionLabel: this.actor.testUserPermission(game.user, "OWNER") ? "НЕОГРАНИЧЕННАЯ" : "ОГРАНИЧЕННАЯ",
+        permissionLabel: "Настройки",
+        portraitClass: `pf1-portraits-${game.settings.get(MODULE_ID, "memberPortraitStyle") || "pf2e"}`,
         moduleVersion: MODULE_VERSION_LABEL
       },
       members: stats.members,
       languages: stats.languages,
-      skills: stats.skills.filter(isPartyOverviewSkill),
-      knowledgeSkills: stats.skills.filter(isKnowledgeSkill),
+      skills,
+      knowledgeSkills,
+      skillGroups: buildSkillGroups(skills, isBackgroundPartySkill),
+      knowledgeGroups: buildSkillGroups(knowledgeSkills, isBackgroundKnowledgeSkill),
       travel: stats.travel,
       stash: buildStashView(stash),
       stashTotals: buildStashTotals(stash),
@@ -1596,6 +2721,7 @@ class PF1PartyActorSheet extends ActorSheet {
 
     html.find(".pf1-party-item").on("dragstart", event => this._onStashItemDragStart(event));
     html.find(".pf1-stash-item").on("click", event => this._onStashItemClick(event));
+    html.find(".pf1-stash-item").on("contextmenu", event => this._onStashItemContext(event));
     html.find(".pf1-currency-input").on("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1612,7 +2738,7 @@ class PF1PartyActorSheet extends ActorSheet {
     html.find(".pf1-stash-field").on("blur", event => this._onStashFieldInput(event));
     html.find(".pf1-stash-price input").on("mouseenter focus", event => this._showStashPriceEach(event));
     html.find(".pf1-stash-price input").on("mouseleave", event => this._restoreStashPriceTotal(event));
-    html.find(".pf1-stash-quantity").on("wheel", event => this._onStashQuantityWheel(event));
+    html.find(".pf1-hero-points").on("contextmenu", event => this._onHeroPointContext(event));
     html.find(".pf1-party-name-input").on("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1645,39 +2771,36 @@ class PF1PartyActorSheet extends ActorSheet {
   }
 
   async _onDrop(event) {
-    event.preventDefault();
-    const data = TextEditor.getDragEventData(event);
+    const nativeEvent = event.originalEvent ?? event;
+    if (nativeEvent?._pf1PartyStashHandled) return;
+    const data = getPartyDropData(event);
     if (!data) return;
 
     if (data.type === "Actor") {
+      event.preventDefault();
       const actor = data.uuid ? await fromUuid(data.uuid) : game.actors.get(data.id);
       if (actor) await addMember(this.actor, actor.id);
-      return this.render(false);
+      this._renderPreservingScroll();
+      return;
     }
 
     if (data.type === "Item") {
-      const item = data.uuid ? await fromUuid(data.uuid) : null;
-      const itemSource = item ?? data.data;
-      if (!itemSource) return ui.notifications.warn("Не удалось прочитать предмет.");
-      const sourceData = itemSource.toObject ? itemSource.toObject() : itemSource;
-      const sourceType = String(sourceData.type || "").toLowerCase();
-      const stashSource = sourceType === "spell" ? await createItemFromDroppedSpell(itemSource) : itemSource;
-      if (!stashSource) return;
-      await this._storeItem(stashSource, event);
-      return this.render(false);
+      const target = nativeEvent?.target instanceof Element ? nativeEvent.target : event.currentTarget;
+      if (!target?.closest?.(".pf1-party-stash-main")) return;
+      event.preventDefault();
+      await storeDroppedItemInPartyStash(this.actor, data, event);
+      this._renderPreservingScroll();
+      return;
     }
   }
 
-  async _storeItem(item, event) {
-    const stash = getStash(this.actor);
-    const stashItem = normalizeItemForStash(item);
-    stash.items.push(stashItem);
-    await setStash(this.actor, stash);
+  async _storeItem(item, event, { sourceDocument = null, dropData = null } = {}) {
+    const data = item?.toDragData?.() ?? { type: "Item", data: item?.toObject ? item.toObject() : item };
+    return storeDroppedItemInPartyStash(this.actor, data, event);
+  }
 
-    const parent = item.parent;
-    const shouldMove = parent?.documentName === "Actor" && parent.testUserPermission(game.user, "OWNER") && !event.ctrlKey;
-    if (shouldMove) await parent.deleteEmbeddedDocuments("Item", [item.id]);
-
+  async _deleteMovedSourceItem(item, event, dropData = null) {
+    return deleteMovedSourceItem(item, event, dropData);
   }
 
 
@@ -1686,7 +2809,7 @@ class PF1PartyActorSheet extends ActorSheet {
     const stash = getStash(this.actor);
     const item = stash.items.find(i => i.stashId === stashId);
     if (!item) return;
-    const source = deepClone(item.data ?? item);
+    const source = prepareStashItemSourceForPF1Sheet(item);
     delete source._id;
     source.flags = source.flags || {};
     source.flags[MODULE_ID] = source.flags[MODULE_ID] || {};
@@ -1701,46 +2824,138 @@ class PF1PartyActorSheet extends ActorSheet {
 
   async _onStashItemClick(event) {
     if ($(event.target).closest("button, a, input, select, textarea, [data-action]").length) return;
+    event.currentTarget.classList.toggle("is-description-open");
+  }
+
+  async _onStashItemContext(event) {
+    if ($(event.target).closest("button, a, input, select, textarea, [data-action]").length) return;
+    event.preventDefault();
     await this._openStashItem(event.currentTarget.dataset.itemId);
   }
 
   async _openStashItem(stashId) {
+    const scrollSnapshots = captureOpenPartySheetScrolls();
     await this._saveQueuedStashQuantity(stashId);
+    restoreOpenPartySheetScrolls(scrollSnapshots);
+
     const stash = getStash(this.actor);
     const stashItem = stash.items.find(i => i.stashId === stashId);
     if (!stashItem) return;
 
-    const source = getStashItemSource(stashItem);
+    const source = prepareStashItemSourceForPF1Sheet(stashItem);
     const editable = this.actor.testUserPermission(game.user, "OWNER");
     try {
       const ItemClass = CONFIG.Item?.documentClass ?? globalThis.Item;
       if (!ItemClass) throw new Error("Item document class is not available.");
       const item = new ItemClass(source, { parent: this.actor });
+      registerOpenStashItemSource(item, this.actor, stashId);
+      if (typeof item.prepareData === "function") item.prepareData();
       const originalTestUserPermission = item.testUserPermission?.bind(item);
       item.testUserPermission = (user, permission, ...args) => editable || originalTestUserPermission?.(user, permission, ...args) || false;
       item.update = async (changes = {}, options = {}) => {
         if (!editable) return item;
+        const updateScrollSnapshots = captureOpenPartySheetScrolls();
         if (typeof item.updateSource === "function") item.updateSource(changes, options);
+        if (typeof item.prepareData === "function") item.prepareData();
         const expanded = foundry.utils.expandObject(changes ?? {});
         const nextSource = item.toObject
           ? item.toObject()
           : mergeObject(source, expanded, { inplace: false });
         await updateStashItemSource(this.actor, stashId, nextSource);
-        renderOpenPartySheets();
+        for (const app of Object.values(item.apps ?? {})) {
+          if (app.rendered) app.render(false);
+        }
+        await renderOpenPartySheets();
+        restoreOpenPartySheetScrolls(updateScrollSnapshots);
         return item;
       };
       item.delete = async () => {
-        if (editable) await this._deleteStashItem(stashId);
+        if (editable) {
+          const deleteScrollSnapshots = captureOpenPartySheetScrolls();
+          await this._deleteStashItem(stashId);
+          await renderOpenPartySheets();
+          restoreOpenPartySheetScrolls(deleteScrollSnapshots);
+        }
         return item;
       };
       const sheet = item.sheet;
       if (!sheet) throw new Error("Item sheet is not available.");
       if (sheet.options) sheet.options.editable = editable;
+      const scheduleContainerDragDataInjection = () => {
+        setTimeout(() => injectStashContainerSheetDragData(sheet, sheet.element), 0);
+        setTimeout(() => injectStashContainerSheetDragData(sheet, sheet.element), 150);
+        setTimeout(() => injectStashContainerSheetDragData(sheet, sheet.element), 500);
+      };
+      const originalRender = sheet.render?.bind(sheet);
+      if (originalRender) {
+        sheet.render = (...args) => {
+          const result = originalRender(...args);
+          scheduleContainerDragDataInjection();
+          return result;
+        };
+      }
+      const restoreItemSheetCloseScrolls = snapshots => {
+        if (!snapshots?.length) return;
+        for (const snapshot of snapshots) {
+          if (snapshot.app?._pf1PartyScrollLock) delete snapshot.app._pf1PartyScrollLock;
+        }
+        restoreOpenPartySheetScrollsBriefly(snapshots);
+      };
+      const closeHookNames = ["closeApplication", "closeDocumentSheet", "closeItemSheet", "closeItemSheetPF", "closeItemSheetPF_Container"];
+      const closeHooks = [];
+      let closeHandled = false;
+      const clearCloseHooks = () => {
+        for (const [hookName, hookId] of closeHooks) Hooks.off(hookName, hookId);
+        closeHooks.length = 0;
+      };
+      const finishItemSheetClose = snapshots => {
+        if (closeHandled) return;
+        closeHandled = true;
+        clearCloseHooks();
+        unregisterOpenStashItemSource(item);
+        restoreItemSheetCloseScrolls(snapshots?.length ? snapshots : scrollSnapshots);
+      };
+      for (const hookName of closeHookNames) {
+        const hookId = Hooks.on(hookName, app => {
+          if (app !== sheet && app.object !== item && app.document !== item) return;
+          finishItemSheetClose(sheet._pf1PartyClosingSnapshots ?? captureOpenPartySheetScrolls());
+        });
+        closeHooks.push([hookName, hookId]);
+      }
+      const originalClose = sheet.close?.bind(sheet);
+      if (originalClose) {
+        sheet.close = async (...args) => {
+          const closeScrollSnapshots = captureOpenPartySheetScrolls();
+          sheet._pf1PartyClosingSnapshots = closeScrollSnapshots;
+          try {
+            return await originalClose(...args);
+          } finally {
+            finishItemSheetClose(closeScrollSnapshots);
+          }
+        };
+      }
       sheet.render(true);
+      scheduleContainerDragDataInjection();
+      restoreOpenPartySheetScrolls(scrollSnapshots);
     } catch (err) {
       console.warn(`${MODULE_ID} | Could not open stash item sheet`, err);
-      renderStashItemFallbackDialog(this.actor, stashId, stashItem, source, { editable });
+      restoreOpenPartySheetScrolls(scrollSnapshots);
+      ui.notifications.error("Не удалось открыть лист предмета PF1e. Подробности в консоли.");
     }
+  }
+
+  async _onHeroPointContext(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.blur?.();
+    await this._adjustHeroPoints(event.currentTarget.dataset.actorId, -1);
+  }
+
+  async _adjustHeroPoints(actorId, delta) {
+    if (!actorId) return;
+    const scrollSnapshots = captureOpenPartySheetScrolls();
+    await changeActorHeroPoints(this.actor, actorId, delta);
+    restoreOpenPartySheetScrolls(scrollSnapshots);
   }
 
   async _onCurrencyInput(event) {
@@ -1763,8 +2978,10 @@ class PF1PartyActorSheet extends ActorSheet {
       return;
     }
     stash.currency[coin] = next;
+    const scrollSnapshots = captureOpenPartySheetScrolls();
     await setStash(this.actor, stash);
-    this.render(false);
+    this._renderPreservingScroll();
+    restoreOpenPartySheetScrolls(scrollSnapshots);
   }
 
   _showStashPriceEach(event) {
@@ -1827,6 +3044,10 @@ class PF1PartyActorSheet extends ActorSheet {
       return;
     }
     const source = getStashItemSource(item);
+    if (getItemQuantity(source) === quantity) {
+      this._stashQuantityState.delete(stashId);
+      return;
+    }
     setItemQuantity(source, quantity);
     await updateStashItemSource(this.actor, stashId, source);
     if (this._stashQuantityState.get(stashId) === quantity) this._stashQuantityState.delete(stashId);
@@ -1838,16 +3059,7 @@ class PF1PartyActorSheet extends ActorSheet {
     await this._updateStashItemField(input.dataset.itemId, input.dataset.field, input.value, {
       row: $(input).closest(".pf1-stash-item")
     });
-    this.render(false);
-  }
-
-  _onStashQuantityWheel(event) {
-    event.preventDefault();
-    const nativeEvent = event.originalEvent ?? event;
-    const delta = nativeEvent.deltaY < 0 ? 1 : -1;
-    this._changeStashQuantity(event.currentTarget.dataset.itemId, delta, {
-      row: $(event.currentTarget).closest(".pf1-stash-item")
-    });
+    this._renderPreservingScroll();
   }
 
   _changeStashQuantity(stashId, delta, { row = null } = {}) {
@@ -1926,14 +3138,28 @@ class PF1PartyActorSheet extends ActorSheet {
       case "remove-member":
         await removeMember(this.actor, actorId);
         break;
+      case "adjust-hero-points":
+        button.blur?.();
+        await this._adjustHeroPoints(actorId, 1);
+        return;
       case "roll-skill":
-        await rollSkill(actor, button.dataset.skillId, { flavor: `${actor?.name}: ${button.textContent.trim()}` });
+        if (actor) {
+          await rollSkill(actor, button.dataset.skillId, {
+            flavor: `${actor.name}: ${button.textContent.trim()}`,
+            heroPointBonus: event.shiftKey ? 8 : 0,
+            partyActor: this.actor
+          });
+        } else {
+          await this._chooseSkillRoller(button.dataset.skillId, button.dataset.skillLabel || button.textContent.trim(), {
+            heroPointBonus: event.shiftKey ? 8 : 0
+          });
+        }
         break;
       case "set-activity":
         await this._setActivity(actor);
         break;
       case "roll-activity":
-        await this._rollActivity(actor);
+        await this._rollActivity(actor, { heroPointBonus: event.shiftKey ? 8 : 0 });
         break;
       case "roll-activities":
         await this._openCheckRequestDialog();
@@ -1959,6 +3185,9 @@ class PF1PartyActorSheet extends ActorSheet {
       case "split-stash-item":
         await this._splitStashItem(button.dataset.itemId);
         break;
+      case "edit-stash-item":
+        await this._openStashItem(button.dataset.itemId);
+        return;
       case "change-stash-quantity":
         this._changeStashQuantity(button.dataset.itemId, toNumber(button.dataset.delta, 0), {
           row: $(button).closest(".pf1-stash-item")
@@ -1973,9 +3202,12 @@ class PF1PartyActorSheet extends ActorSheet {
       case "stash-category-add":
         await this._createStashItem(button.dataset.category);
         break;
+      case "open-item-library":
+        await this._openItemLibrary(button.dataset.category);
+        break;
     }
 
-    this.render(false);
+    this._renderPreservingScroll();
   }
 
   async _renameParty() {
@@ -2008,6 +3240,43 @@ class PF1PartyActorSheet extends ActorSheet {
     if (!result) return;
     if (result.reset) await this.actor.setFlag(MODULE_ID, METAGAME_FLAG, defaultMetagameSettings());
     else await this.actor.setFlag(MODULE_ID, METAGAME_FLAG, result);
+  }
+
+  async _chooseSkillRoller(skillId, label, { heroPointBonus = 0 } = {}) {
+    const rows = getPartyMembers(this.actor, { ignorePermissions: true })
+      .map(actor => ({ actor, bonus: getSkillBonus(actor, skillId) }))
+      .sort((a, b) => b.bonus - a.bonus || a.actor.name.localeCompare(b.actor.name, game.i18n.lang));
+    if (!rows.length) return;
+
+    const options = rows
+      .map(row => `<option value="${escapeHTML(row.actor.id)}">${escapeHTML(row.actor.name)} ${signed(row.bonus)}</option>`)
+      .join("");
+    const result = await dialogPromise({
+      title: `Бросок навыка: ${escapeHTML(label || skillId)}`,
+      content: `
+        <form class="pf1-party-dialog pf1-skill-roll-dialog">
+          <div class="form-group">
+            <label>Персонаж</label>
+            <select name="actorId">${options}</select>
+          </div>
+        </form>`,
+      buttons: {
+        roll: {
+          label: "Подтвердить",
+          callback: html => String(new FormData(html.find("form")[0]).get("actorId") || "")
+        },
+        cancel: { label: "Отмена", callback: () => null }
+      },
+      defaultButton: "roll"
+    });
+    if (!result) return;
+    const actor = game.actors.get(result);
+    if (!actor) return;
+    await rollSkill(actor, skillId, {
+      flavor: `${actor.name}: ${label || skillId}`,
+      heroPointBonus,
+      partyActor: this.actor
+    });
   }
 
   async _openCheckRequestDialog() {
@@ -2044,7 +3313,7 @@ class PF1PartyActorSheet extends ActorSheet {
     await this.actor.setFlag(MODULE_ID, ACTIVITIES_FLAG, activities);
   }
 
-  async _rollActivity(actor) {
+  async _rollActivity(actor, { heroPointBonus = 0 } = {}) {
     if (!actor) return;
     const activities = this.actor.getFlag(MODULE_ID, ACTIVITIES_FLAG) ?? {};
     const activity = activities[actor.id];
@@ -2052,7 +3321,9 @@ class PF1PartyActorSheet extends ActorSheet {
     await rollSkill(actor, activity.skillId, {
       flavor: `${actor.name}: ${activity.title || "Активность"}`,
       extraBonus: activity.bonus,
-      dc: activity.dc
+      dc: activity.dc,
+      heroPointBonus,
+      partyActor: this.actor
     });
   }
 
@@ -2206,7 +3477,7 @@ class PF1PartyActorSheet extends ActorSheet {
     const item = stash.items.find(i => i.stashId === stashId);
     if (!actor || !item) return;
 
-    const source = deepClone(item.data ?? item);
+    const source = prepareStashItemSourceForPF1Sheet(item);
     delete source._id;
     await actor.createEmbeddedDocuments("Item", [source]);
     stash.items = stash.items.filter(i => i.stashId !== stashId);
@@ -2224,19 +3495,82 @@ class PF1PartyActorSheet extends ActorSheet {
   }
 
   async _createStashItem(category) {
-    const source = await itemDialog(category);
-    if (!source) return;
+    const source = defaultStashItemSource(category);
     const stash = getStash(this.actor);
-    stash.items.push(normalizeItemForStash(source));
+    const entry = normalizeItemForStash(source);
+    stash.items.push(entry);
     await setStash(this.actor, stash);
+  }
+
+  async _openItemLibrary(category) {
+    if (await openNativePF1ItemBrowser(category)) return;
+
+    const categoryTerms = {
+      weapons: ["weapon", "оруж"],
+      armor: ["armor", "equipment", "брон", "снаряж"],
+      consumables: ["potion", "scroll", "wand", "consum", "зель", "свит", "жез", "расход"],
+      equipment: ["equipment", "gear", "снаряж"],
+      ammo: ["ammo", "ammunition", "боеприп", "стрел"],
+      misc: ["loot", "misc", "treasure", "разное", "добыч"],
+      goods: ["goods", "trade", "товар"],
+      containers: ["container", "контейнер"]
+    };
+    const packs = [...(game.packs ?? [])].filter(pack => {
+      const meta = pack.metadata ?? {};
+      return pack.documentName === "Item" && (meta.package === "pf1" || meta.system === "pf1" || String(meta.id || "").startsWith("pf1."));
+    });
+    if (!packs.length) {
+      ui.notifications.warn("Не найдены библиотеки предметов Pathfinder 1e.");
+      return;
+    }
+
+    const terms = categoryTerms[category] ?? [];
+    const preferred = packs.filter(pack => {
+      const meta = pack.metadata ?? {};
+      const text = `${pack.collection ?? ""} ${meta.id ?? ""} ${meta.label ?? ""} ${pack.title ?? ""}`.toLocaleLowerCase(game.i18n?.lang || "ru");
+      return terms.some(term => text.includes(term));
+    });
+    const matches = preferred.length ? preferred : packs;
+
+    if (matches.length === 1) {
+      matches[0].render(true);
+      return;
+    }
+
+    const rows = matches
+      .sort((a, b) => (a.metadata?.label || a.title || a.collection).localeCompare(b.metadata?.label || b.title || b.collection, game.i18n.lang))
+      .map(pack => {
+        const label = pack.metadata?.label || pack.title || pack.collection;
+        return `<button type="button" data-pack="${escapeHTML(pack.collection)}">${escapeHTML(label)}</button>`;
+      }).join("");
+
+    new Dialog({
+      title: "Библиотеки Pathfinder 1e",
+      content: `<div class="pf1-party-dialog pf1-library-dialog">${rows}</div>`,
+      buttons: { close: { label: "Закрыть" } },
+      render: html => {
+        html.find("[data-pack]").on("click", event => {
+          const pack = game.packs.get(event.currentTarget.dataset.pack);
+          pack?.render(true);
+        });
+      }
+    }).render(true);
   }
 
   _filterStash(query, html) {
     const q = String(query || "").trim().toLowerCase();
-    html.find(".pf1-stash-item").each((_, element) => {
-      const row = $(element);
-      const name = row.find(".pf1-stash-item-name").text().toLowerCase();
-      row.toggle(!q || name.includes(q));
+    html.find(".pf1-stash-category").each((_, category) => {
+      const categoryElement = $(category);
+      let visibleCount = 0;
+      categoryElement.find(".pf1-stash-item").each((_, element) => {
+        const row = $(element);
+        const haystack = String(row.data("search") || "").toLowerCase();
+        const visible = !q || haystack.includes(q);
+        row.toggleClass("is-filter-hidden", !visible);
+        if (visible) visibleCount += 1;
+      });
+      categoryElement.toggleClass("is-filter-hidden", !!q && visibleCount === 0);
+      if (q && visibleCount > 0) category.open = true;
     });
   }
 }
@@ -2401,8 +3735,247 @@ async function renderOpenPartySheets() {
   if (!actor) return;
   await refreshPublicPartySnapshot(actor);
   for (const app of Object.values(actor.apps ?? {})) {
-    if (app instanceof PF1PartyActorSheet) app.render(false);
+    if (app instanceof PF1PartyActorSheet) renderPartySheetPreservingScroll(app);
   }
+}
+
+function getChatMessageFromContext(li) {
+  const jq = li?.jquery ? li : $(li);
+  const id = jq.data("messageId") || jq.attr("data-message-id") || jq.attr("data-messageId");
+  return id ? game.messages.get(id) : null;
+}
+
+function getChatMessageActor(message) {
+  const actorId = message?.getFlag?.(MODULE_ID, "actorId") || message?.speaker?.actor;
+  return actorId ? game.actors.get(actorId) : null;
+}
+
+function getChatMessageParty(message) {
+  const partyActorId = message?.getFlag?.(MODULE_ID, "partyActorId");
+  return partyActorId ? game.actors.get(partyActorId) : getPartyActor();
+}
+
+function getChatMessageRollTotal(message) {
+  const rolls = message?.rolls?.length ? message.rolls : (message?.roll ? [message.roll] : []);
+  const total = rolls[0]?.total;
+  return Number.isFinite(total) ? total : null;
+}
+
+function canUseHeroPointOnChatMessage(message) {
+  if (!message || message.getFlag?.(MODULE_ID, "heroPointChatBonusUsed")) return false;
+  if (message.getFlag?.(MODULE_ID, "heroPointPreBonusUsed")) return false;
+  if (getChatMessageRollTotal(message) === null) return false;
+  const actor = getChatMessageActor(message);
+  const party = getChatMessageParty(message);
+  if (!actor || !party) return false;
+  const isPartyMember = getPartyMembers(party, { ignorePermissions: true }).some(member => member.id === actor.id);
+  if (!isPartyMember) return false;
+  const canSpend = game.user.isGM || actor.testUserPermission(game.user, "OWNER") || party.testUserPermission(game.user, "OWNER");
+  if (!canSpend) return false;
+  return getHeroPointValue(getHeroPoints(party), actor.id) > 0;
+}
+
+async function useHeroPointOnChatMessage(message) {
+  if (!canUseHeroPointOnChatMessage(message)) return;
+  const actor = getChatMessageActor(message);
+  const party = getChatMessageParty(message);
+  const total = getChatMessageRollTotal(message);
+  const spent = await spendHeroPoint(party, actor.id);
+  if (!spent) return;
+
+  const finalTotal = total + HERO_POINT_CHAT_BONUS;
+  const note = `
+    <div class="pf1-hero-point-chat-bonus">
+      <span class="pf1-hero-point-chat-icon"><img src="${HERO_POINT_ICON}" alt=""></span>
+      <div class="pf1-hero-point-chat-text">
+        <strong>Использовано геройское очко</strong>
+        <span>${escapeHTML(actor.name)}: ${fmtNumber(total)} + ${HERO_POINT_CHAT_BONUS} = <b>${fmtNumber(finalTotal)}</b></span>
+      </div>
+    </div>`;
+  const flags = {
+    [`flags.${MODULE_ID}.heroPointChatBonusUsed`]: true,
+    [`flags.${MODULE_ID}.heroPointChatBonus`]: HERO_POINT_CHAT_BONUS,
+    [`flags.${MODULE_ID}.heroPointOriginalTotal`]: total,
+    [`flags.${MODULE_ID}.heroPointFinalTotal`]: finalTotal,
+    [`flags.${MODULE_ID}.actorId`]: actor.id,
+    [`flags.${MODULE_ID}.partyActorId`]: party.id
+  };
+
+  try {
+    await message.update({ content: `${message.content || ""}${note}`, ...flags });
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Could not update roll message with hero point bonus`, err);
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      content: note,
+      flags: foundry.utils.expandObject(flags).flags
+    });
+  }
+  await renderOpenPartySheets();
+}
+
+function actorIsInParty(actor, party = getPartyActor()) {
+  if (!actor || !party) return false;
+  return getPartyMembers(party, { ignorePermissions: true }).some(member => member.id === actor.id);
+}
+
+function injectActorSheetHeroPoints(app, html) {
+  const actor = app?.actor ?? app?.object;
+  const party = getPartyActor();
+  if (!actorIsInParty(actor, party)) return;
+  const root = html?.jquery ? html : $(html);
+  if (root.find(".pf1-actor-hero-points").length) return;
+
+  const state = getHeroPointState(getHeroPoints(party), actor.id);
+  const control = $(heroPointControlHTML(actor.id, state, { className: "pf1-actor-hero-points" }));
+  control.on("click", async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    await changeActorHeroPoints(party, actor.id, 1);
+  });
+  control.on("contextmenu", async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    await changeActorHeroPoints(party, actor.id, -1);
+  });
+
+  const nameInput = root.find('input[name="name"], input[name="actor.name"], input[name="data.name"]').first();
+  if (nameInput.length) {
+    nameInput.parent().addClass("pf1-actor-name-hero-wrap");
+    nameInput.after(control);
+    return;
+  }
+
+  const fallback = root.find(".charname, .character-name, h1, header").first();
+  if (fallback.length) fallback.append(control);
+}
+
+function inferActorFromRollDialog(app, html) {
+  const candidates = [
+    app?.actor,
+    app?.object?.actor,
+    app?.object,
+    app?.options?.actor,
+    app?.data?.actor
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (candidate?.documentName === "Actor") return candidate;
+    if (candidate?.actor?.documentName === "Actor") return candidate.actor;
+  }
+  const speakerActor = app?.data?.speaker?.actor ?? app?.options?.speaker?.actor;
+  if (speakerActor && game.actors?.has(speakerActor)) return game.actors.get(speakerActor);
+  const title = normalizeBrowserFilterText(`${app?.title ?? ""} ${html.closest(".window-app").find(".window-title").first().text()}`);
+  return [...(game.actors ?? [])].find(actor => title.includes(normalizeBrowserFilterText(actor.name))) ?? null;
+}
+
+function findRollDialogBaseDiceRow(root) {
+  const labels = root.find("label, span, h3, h4, div").filter((_, element) => /base dice|базов/i.test(element.textContent || ""));
+  for (const label of labels) {
+    const row = $(label).closest(".form-group, .form-fields, .form-row, li, tr, div");
+    if (row.length) return row.first();
+  }
+  const diceInput = root.find("input[name]").filter((_, element) => /dice|base/i.test(element.name || "")).first();
+  return diceInput.length ? diceInput.closest(".form-group, .form-fields, .form-row, li, tr, div").first() : $();
+}
+
+function findRollDialogSituationalBonusRow(root) {
+  const labels = root.find("label, span, h3, h4, div").filter((_, element) => /ситуатив|situational/i.test(element.textContent || ""));
+  for (const label of labels) {
+    const row = $(label).closest(".form-group, .form-fields, .form-row, li, tr, div");
+    if (row.find("input, textarea").length) return row.first();
+  }
+  const input = root.find("input[name], textarea[name]").filter((_, element) => {
+    const name = String(element.name || "").toLocaleLowerCase();
+    return /bonus|modifier|mod|extra|circumstance|situational/.test(name);
+  }).first();
+  return input.length ? input.closest(".form-group, .form-fields, .form-row, li, tr, div").first() : $();
+}
+
+function findRollDialogSituationalBonusInput(root) {
+  const namedInput = root.find("input[name], textarea[name]").filter((_, element) => {
+    const name = String(element.name || "").toLocaleLowerCase();
+    if (/dice|base|dc|notes?|flavor|rollmode|mode/.test(name)) return false;
+    return /bonus|modifier|mod|extra|circumstance|situational/.test(name);
+  }).first();
+  if (namedInput.length) return namedInput;
+
+  const labels = root.find("label, span").filter((_, element) => /ситуатив(?:ный)?\s+бонус|situational\s+bonus/i.test((element.textContent || "").trim()));
+  for (const label of labels) {
+    let row = $(label);
+    for (let depth = 0; depth < 5 && row.length; depth++) {
+      const inputs = row.find("input, textarea").filter((_, element) => {
+        const name = String(element.name || "").toLocaleLowerCase();
+        const placeholder = String(element.placeholder || "").toLocaleLowerCase();
+        return !/dice|base|dc|notes?|flavor|rollmode|mode|2d20/.test(`${name} ${placeholder}`);
+      });
+      if (inputs.length === 1) return inputs.first();
+      row = row.parent();
+    }
+  }
+  return $();
+}
+
+function appendFormulaBonus(value, bonus) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return String(bonus);
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return String(numeric + bonus);
+  return `(${raw}) + ${bonus}`;
+}
+
+function applyHeroPointBonusToRollDialog(root) {
+  const form = root.find("form").first();
+  const bonus = HERO_POINT_PRE_ROLL_BONUS;
+  const inputs = form.find('input[name], textarea[name]').filter((_, element) => {
+    const name = String(element.name || "").toLocaleLowerCase();
+    if (/dice|base|dc|notes?|flavor|rollmode|mode/.test(name)) return false;
+    return /bonus|modifier|mod|extra|circumstance|situational/.test(name);
+  });
+  const target = inputs.first();
+  if (target.length) {
+    target.val(appendFormulaBonus(target.val(), bonus)).trigger("change");
+    return;
+  }
+  form.append(`<input type="hidden" name="bonus" value="${bonus}">`);
+}
+
+function isHeroPointRollButton(element) {
+  const text = normalizeBrowserFilterText(element?.textContent ?? "");
+  const action = normalizeBrowserFilterText(element?.dataset?.button ?? element?.dataset?.action ?? element?.name ?? "");
+  return /обычн|normal|take 10|take10|take 20|take20/.test(`${text} ${action}`);
+}
+
+function injectHeroPointRollDialog(app, html) {
+  const root = html?.jquery ? html : $(html);
+  if (root.find(".pf1-hero-roll-toggle").length) return;
+  if (!/base dice|take 10|take 20|обычн|базов/i.test(root.text())) return;
+
+  const actor = inferActorFromRollDialog(app, root);
+  const party = getPartyActor();
+  if (!actorIsInParty(actor, party)) return;
+  if (getHeroPointValue(getHeroPoints(party), actor.id) <= 0) return;
+
+  const situationalInput = findRollDialogSituationalBonusInput(root);
+  if (!situationalInput.length) return;
+  const row = situationalInput.closest(".form-group, .form-fields, .form-row, li, tr, div").first();
+  const toggle = $(`<button type="button" class="pf1-hero-roll-toggle" title="Геройское очко: +${HERO_POINT_PRE_ROLL_BONUS} к броску"><img src="${HERO_POINT_ICON}" alt=""></button>`);
+  toggle.on("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggle.toggleClass("is-active");
+  });
+  row.addClass("pf1-hero-roll-row");
+  toggle.insertBefore(situationalInput);
+
+  const rootElement = root[0];
+  rootElement.addEventListener("click", event => {
+    const button = event.target?.closest?.("button");
+    if (!button || !isHeroPointRollButton(button)) return;
+    if (!toggle.hasClass("is-active") || rootElement.dataset.pf1HeroPointSpent === "true") return;
+    rootElement.dataset.pf1HeroPointSpent = "true";
+    applyHeroPointBonusToRollDialog(root);
+    spendHeroPoint(party, actor.id).then(() => refreshHeroPointControls(actor.id));
+  }, true);
 }
 
 Hooks.once("init", () => {
@@ -2456,6 +4029,20 @@ Hooks.once("init", () => {
     onChange: () => ui.actors?.render(false)
   });
 
+  game.settings.register(MODULE_ID, "memberPortraitStyle", {
+    name: "Вид портретов в листе партии",
+    hint: "PF2e убирает лишние поля у картинок. Круг включает старый вариант портретов в круглой рамке.",
+    scope: "client",
+    config: true,
+    type: String,
+    choices: {
+      pf2e: "PF2e без лишних полей",
+      circle: "Старые круглые портреты"
+    },
+    default: "pf2e",
+    onChange: () => renderOpenPartySheets()
+  });
+
   Handlebars.registerHelper("signed", signed);
   Handlebars.registerHelper("fmt", fmtNumber);
 
@@ -2478,6 +4065,46 @@ Hooks.once("ready", async () => {
 });
 
 Hooks.on("renderActorDirectory", (app, html) => injectPartyDirectory(html));
+Hooks.on("renderActorSheet", (app, html) => injectActorSheetHeroPoints(app, html));
+Hooks.on("renderDialog", (app, html) => injectHeroPointRollDialog(app, html));
+Hooks.on("renderItemSheet", injectStashContainerSheetDragData);
+Hooks.on("renderItemSheetPF", injectStashContainerSheetDragData);
+Hooks.on("renderItemSheetPF_Container", injectStashContainerSheetDragData);
+Hooks.once("ready", () => {
+  document.addEventListener("dragover", event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const stashArea = target.closest(".window-app.pf1-party-folder .pf1-party-stash-main");
+    if (!stashArea) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  }, true);
+  document.addEventListener("drop", event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const stashArea = target.closest(".window-app.pf1-party-folder .pf1-party-stash-main");
+    if (!stashArea) return;
+    const data = getPartyDropData(event);
+    if (data?.type !== "Item") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    event._pf1PartyStashHandled = true;
+    const appId = stashArea.closest(".app")?.dataset?.appid;
+    const app = appId ? ui.windows?.[appId] : null;
+    const party = app instanceof PF1PartyActorSheet ? app.actor : getPartyActor();
+    if (!party) return;
+    storeDroppedItemInPartyStash(party, data, event).catch(err => console.warn(`${MODULE_ID} | Manual stash drop failed`, err));
+  }, true);
+});
+Hooks.on("getChatLogEntryContext", (html, options) => {
+  options.push({
+    name: "Использовать геройское очко",
+    icon: `<img class="pf1-hero-point-context-icon" src="${HERO_POINT_ICON}" alt="">`,
+    condition: li => canUseHeroPointOnChatMessage(getChatMessageFromContext(li)),
+    callback: li => useHeroPointOnChatMessage(getChatMessageFromContext(li))
+  });
+});
 Hooks.on("dropCanvasData", async (canvas, data, event) => {
   if (data?.type === "PF1EPartyToken") {
     event?.preventDefault?.();
@@ -2496,7 +4123,15 @@ Hooks.on("updateFolder", async (folder, changed) => {
 });
 
 Hooks.on("createActor", renderOpenPartySheets);
-Hooks.on("updateActor", renderOpenPartySheets);
+Hooks.on("updateActor", (actor, changed) => {
+  const party = getPartyActor();
+  const changedHeroPoints = has(changed, `flags.${MODULE_ID}.${HERO_POINTS_FLAG}`);
+  if (party && actor?.id === party.id && changedHeroPoints) {
+    for (const actorId of Object.keys(getHeroPoints(party))) refreshHeroPointControls(actorId);
+    return;
+  }
+  renderOpenPartySheets();
+});
 Hooks.on("deleteActor", renderOpenPartySheets);
 Hooks.on("createItem", async (item, options, userId) => {
   const transfer = item.getFlag?.(MODULE_ID, STASH_TRANSFER_FLAG) ?? gprop(item, `flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`);
