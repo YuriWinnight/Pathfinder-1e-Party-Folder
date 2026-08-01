@@ -12,7 +12,7 @@ const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX = 3;
-const MODULE_VERSION_LABEL = "v1.5.6";
+const MODULE_VERSION_LABEL = "v1.5.7";
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
 const HERO_POINT_SAVE_DELAY_MS = 180;
 const HERO_POINT_PRE_ROLL_BONUS = 8;
@@ -87,7 +87,26 @@ const CURRENCY_META = {
   cp: { label: "ММ", aliases: ["cp", "copper"], cp: 1, img: `modules/${MODULE_ID}/assets/copper-pieces.webp` }
 };
 
+function getOwnDataValue(object) {
+  if (!object || typeof object !== "object") return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(object, "data");
+  return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+}
+
 function gprop(obj, path) {
+  if (typeof path === "string" && (path === "data.data" || path.startsWith("data.data."))) {
+    if (isDocumentLike(obj) && obj.system) {
+      if (path === "data.data") return obj.system;
+      return foundry.utils.getProperty(obj.system, path.slice("data.data.".length));
+    }
+
+    const legacyData = getOwnDataValue(obj);
+    if (legacyData === undefined) return undefined;
+    const nestedData = getOwnDataValue(legacyData);
+    const legacySystem = nestedData === undefined ? legacyData : nestedData;
+    if (path === "data.data") return legacySystem;
+    return foundry.utils.getProperty(legacySystem, path.slice("data.data.".length));
+  }
   return foundry.utils.getProperty(obj, path);
 }
 
@@ -1320,7 +1339,7 @@ function isDocumentLike(value) {
 function getItemSourceData(item) {
   if (!item) return {};
   if (typeof item.toObject === "function") return item.toObject(false);
-  return item;
+  return getOwnDataValue(item) ?? item;
 }
 
 function parsePriceToGp(raw) {
@@ -2012,7 +2031,7 @@ async function updateStashItemSource(partyActor, stashId, itemSource) {
 }
 
 function categoryForItem(item) {
-  const data = item.data ?? item;
+  const data = getItemSourceData(item);
   const type = String(item.type || data.type || "loot").toLocaleLowerCase(game.i18n?.lang || "ru");
   const name = String(item.name || data.name || "").toLocaleLowerCase(game.i18n?.lang || "ru");
   const subType = String(
@@ -2121,7 +2140,7 @@ function buildStashTotals(stash) {
   let itemsGp = 0;
   let weight = 0;
   for (const item of stash.items ?? []) {
-    const data = item.data ?? item;
+    const data = getItemSourceData(item);
     const q = getItemQuantity(data);
     itemsGp += getItemPriceGpEach(data) * q;
     weight += getItemWeightEach(data) * q;
@@ -2147,7 +2166,7 @@ function buildPartyTotals(stash, members) {
   let itemsGp = 0;
   let weight = 0;
   for (const item of stash.items ?? []) {
-    const data = item.data ?? item;
+    const data = getItemSourceData(item);
     const q = getItemQuantity(data);
     itemsGp += getItemPriceGpEach(data) * q;
     weight += getItemWeightEach(data) * q;
@@ -3705,12 +3724,15 @@ function injectPartyDirectory(html) {
   if (!header.length) return;
 
   const buttonImg = getPartyTokenImage(getPartyActor());
-  const safeButtonImg = String(buttonImg).replace(/"/g, "%22");
+  const buttonImgUrl = /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(String(buttonImg))
+    ? String(buttonImg)
+    : `/${String(buttonImg).replace(/^\/+/, "")}`;
+  const safeButtonImg = buttonImgUrl.replace(/"/g, "%22");
   const buttonStyle = game.settings.get(MODULE_ID, "folderButtonStyle") || "icon";
   const styleClass = buttonStyle === "circle" ? "is-circle" : "is-icon";
   const button = $(
     `<a class="pf1-folder-open-party-button ${styleClass}" title="Открыть меню партии" aria-label="Открыть меню партии">
-      <span class="pf1-folder-open-party-icon" aria-hidden="true"><i class="fas fa-users"></i><img src="${escapeHTML(buttonImg)}" alt=""></span>
+      <span class="pf1-folder-open-party-icon" aria-hidden="true"><i class="fas fa-users"></i><img src="${escapeHTML(buttonImgUrl)}" alt=""></span>
     </a>`
   );
   button[0]?.style?.setProperty("--pf1-party-folder-icon", `url("${safeButtonImg}")`);
