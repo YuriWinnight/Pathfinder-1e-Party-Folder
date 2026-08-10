@@ -11,8 +11,8 @@ const HERO_POINTS_FLAG = "heroPoints";
 const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
-const HERO_POINTS_MAX = 3;
-const MODULE_VERSION_LABEL = "v1.5.7";
+const HERO_POINTS_MAX_DEFAULT = 3;
+const MODULE_VERSION_LABEL = "v1.6.5";
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
 const HERO_POINT_SAVE_DELAY_MS = 180;
 const HERO_POINT_PRE_ROLL_BONUS = 8;
@@ -522,33 +522,13 @@ function isMemberCandidate(actor) {
 }
 
 function getPartyMembers(partyActor, { ignorePermissions = false } = {}) {
-  const ids = new Set(partyActor?.getFlag(MODULE_ID, MEMBERS_FLAG) ?? []);
   const folder = getPartyFolder();
-  if (folder) {
-    for (const actor of game.actors ?? []) {
-      if (actor.folder?.id === folder.id && isMemberCandidate(actor)) ids.add(actor.id);
-    }
-  }
-
-  if (game.settings.get(MODULE_ID, "autoUserCharacters")) {
-    for (const user of game.users ?? []) {
-      if (user.isGM) continue;
-      const actor = user.character;
-      if (isMemberCandidate(actor)) ids.add(actor.id);
-    }
-  }
-
-  if (game.user.isGM && game.settings.get(MODULE_ID, "autoOwnedCharacters")) {
-    for (const actor of game.actors ?? []) {
-      if (!isMemberCandidate(actor)) continue;
-      const ownedByPlayer = game.users.some(user => !user.isGM && actor.testUserPermission(user, "OWNER"));
-      if (ownedByPlayer) ids.add(actor.id);
-    }
-  }
-
-  return [...ids]
-    .map(id => game.actors.get(id))
-    .filter(actor => isMemberCandidate(actor) && (ignorePermissions || actor.testUserPermission(game.user, "OBSERVER")));
+  if (!folder) return [];
+  return [...(game.actors ?? [])].filter(actor =>
+    actor.folder?.id === folder.id
+    && isMemberCandidate(actor)
+    && (ignorePermissions || actor.testUserPermission(game.user, "OBSERVER"))
+  );
 }
 
 async function addMember(partyActor, actorId) {
@@ -575,6 +555,14 @@ function getStoredHeroPoints(partyActor) {
   return deepClone(partyActor?.getFlag(MODULE_ID, HERO_POINTS_FLAG) ?? {});
 }
 
+function heroPointsEnabled() {
+  return game.settings.get(MODULE_ID, "heroPointsEnabled") !== false;
+}
+
+function getHeroPointsMax() {
+  return Math.floor(clampNumber(game.settings.get(MODULE_ID, "heroPointsMax"), 1, 3)) || HERO_POINTS_MAX_DEFAULT;
+}
+
 function getHeroPoints(partyActor) {
   const stored = getStoredHeroPoints(partyActor);
   const pending = partyActor?.id ? pendingHeroPointUpdates.get(partyActor.id) : null;
@@ -582,16 +570,19 @@ function getHeroPoints(partyActor) {
 }
 
 function getHeroPointValue(heroPoints, actorId) {
-  return Math.floor(clampNumber(heroPoints?.[actorId], 0, HERO_POINTS_MAX));
+  return Math.floor(clampNumber(heroPoints?.[actorId], 0, getHeroPointsMax()));
 }
 
 function getHeroPointState(heroPoints, actorId) {
+  const enabled = heroPointsEnabled();
+  const max = enabled ? getHeroPointsMax() : 0;
   const value = getHeroPointValue(heroPoints, actorId);
   return {
-    value,
-    max: HERO_POINTS_MAX,
+    enabled,
+    value: enabled ? value : 0,
+    max,
     icon: HERO_POINT_ICON,
-    pips: Array.from({ length: HERO_POINTS_MAX }, (_, index) => ({
+    pips: Array.from({ length: max }, (_, index) => ({
       index: index + 1,
       filled: index < value
     }))
@@ -599,13 +590,14 @@ function getHeroPointState(heroPoints, actorId) {
 }
 
 async function setActorHeroPoints(partyActor, actorId, value) {
+  if (!heroPointsEnabled()) return false;
   if (!partyActor || !actorId) return false;
   if (!partyActor.testUserPermission(game.user, "OWNER")) {
     ui.notifications.warn("Недостаточно прав для изменения геройских очков партии.");
     return false;
   }
   const heroPoints = getHeroPoints(partyActor);
-  const next = Math.floor(clampNumber(value, 0, HERO_POINTS_MAX));
+  const next = Math.floor(clampNumber(value, 0, getHeroPointsMax()));
   if (getHeroPointValue(heroPoints, actorId) === next) {
     refreshHeroPointControls(actorId);
     return true;
@@ -648,6 +640,7 @@ async function changeActorHeroPoints(partyActor, actorId, delta) {
 }
 
 async function spendHeroPoint(partyActor, actorId) {
+  if (!heroPointsEnabled()) return false;
   const heroPoints = getHeroPoints(partyActor);
   const current = getHeroPointValue(heroPoints, actorId);
   if (current <= 0) {
@@ -666,6 +659,7 @@ function heroPointPipsHTML(state) {
 }
 
 function heroPointControlHTML(actorId, state, { className = "" } = {}) {
+  if (!state?.enabled) return "";
   return `<a class="pf1-hero-points ${className}" data-action="adjust-hero-points" data-actor-id="${escapeHTML(actorId)}" title="Геройские очки: ${state.value} / ${state.max}. ЛКМ +1, ПКМ −1.">
     ${heroPointPipsHTML(state)}
   </a>`;
@@ -864,6 +858,40 @@ function getAc(actor) {
     "data.data.attributes.ac.normal.total",
     "data.data.attributes.ac.value"
   ], 10);
+}
+
+function getCombatStats(actor) {
+  const ac = {
+    normal: getAc(actor),
+    touch: firstNumber(actor, [
+      "system.attributes.ac.touch.total",
+      "system.attributes.ac.touch.value",
+      "data.data.attributes.ac.touch.total",
+      "data.data.attributes.ac.touch.value"
+    ], 10),
+    flatFooted: firstNumber(actor, [
+      "system.attributes.ac.flatFooted.total",
+      "system.attributes.ac.flatFooted.value",
+      "data.data.attributes.ac.flatFooted.total",
+      "data.data.attributes.ac.flatFooted.value"
+    ], 10)
+  };
+  const attributes = gprop(actor, "system.attributes") ?? gprop(actor, "data.data.attributes") ?? {};
+  const abilities = gprop(actor, "system.abilities") ?? gprop(actor, "data.data.abilities") ?? {};
+  const size = gprop(actor, "system.traits.size") ?? gprop(actor, "data.data.traits.size");
+  const sizeModifier = toNumber(CONFIG.PF1?.sizeMods?.[size], 0);
+  const attack = attributes.attack ?? {};
+  const sharedAttack = toNumber(attack.shared, 0) + toNumber(attack.general, 0) + sizeModifier;
+  const meleeAbilityMod = toNumber(abilities?.[attack.meleeAbility]?.mod, 0);
+  const rangedAbilityMod = toNumber(abilities?.[attack.rangedAbility]?.mod, 0);
+  return {
+    ac,
+    cmd: firstNumber(actor, ["system.attributes.cmd.total", "data.data.attributes.cmd.total"], 10),
+    bab: firstNumber(actor, ["system.attributes.bab.total", "data.data.attributes.bab.total"], 0),
+    cmb: firstNumber(actor, ["system.attributes.cmb.total", "data.data.attributes.cmb.total"], 0),
+    melee: sharedAttack + toNumber(attack.melee, 0) + meleeAbilityMod,
+    ranged: sharedAttack + toNumber(attack.ranged, 0) + rangedAbilityMod
+  };
 }
 
 function getSaves(actor) {
@@ -1447,6 +1475,25 @@ function getStashItemView(stashItem) {
   const weightEach = getItemWeightEach(data);
   const priceTotal = quantity > 0 ? priceEach * quantity : priceEach;
   const weightTotal = quantity > 0 ? weightEach * quantity : weightEach;
+  const isContainer = String(data.type || stashItem.type || "").toLowerCase() === "container"
+    || data.system?.inventoryItems != null;
+  const containerItems = isContainer ? arrayFromMaybeObject(data.system?.inventoryItems).map(item => {
+    const source = ensureItemSourceBasics(deepClone(item), item);
+    const quantity = getItemQuantity(source);
+    const priceEach = getItemPriceGpEach(source);
+    const weightEach = getItemWeightEach(source);
+    return {
+      itemId: source._id || source.id,
+      name: source.name,
+      img: source.img || "icons/svg/item-bag.svg",
+      quantity,
+      priceGp: fmtNumber(quantity > 0 ? priceEach * quantity : priceEach),
+      priceEach: fmtNumber(priceEach),
+      weight: fmtNumber(quantity > 0 ? weightEach * quantity : weightEach),
+      weightEach: fmtNumber(weightEach),
+      search: `${source.name || ""} ${source.type || ""}`.toLowerCase()
+    };
+  }) : [];
   return {
     ...stashItem,
     name: stashItem.name || data.name || "Предмет",
@@ -1458,8 +1505,11 @@ function getStashItemView(stashItem) {
     weightEach: fmtNumber(weightEach),
     priceGp: fmtNumber(priceTotal),
     priceEach: fmtNumber(priceEach),
+    isContainer,
+    containerItems,
+    containerItemCount: containerItems.length,
     description: getItemDescriptionHTML(data).trim(),
-    search: `${stashItem.name || data.name || ""} ${stashItem.type || data.type || ""}`.toLowerCase()
+    search: `${stashItem.name || data.name || ""} ${stashItem.type || data.type || ""} ${containerItems.map(item => item.name).join(" ")}`.toLowerCase()
   };
 }
 
@@ -1730,6 +1780,119 @@ async function moveStashContainerContentToPartyStash(partyActor, data, event) {
   return true;
 }
 
+function getInlineStashContainerContext(partyActor, containerStashId, itemId = null) {
+  if (!partyActor?.id || !containerStashId) return null;
+  const stash = getStash(partyActor);
+  const containerIndex = stash.items.findIndex(item => item.stashId === containerStashId);
+  if (containerIndex < 0) return null;
+  const containerSource = prepareStashItemSourceForPF1Sheet(stash.items[containerIndex]);
+  if (containerSource.type !== "container" && containerSource.system?.inventoryItems == null) return null;
+  const inventory = arrayFromMaybeObject(containerSource.system?.inventoryItems);
+  const itemIndex = itemId == null ? -1 : inventory.findIndex(item => item?._id === itemId || item?.id === itemId);
+  return { stash, containerIndex, containerSource, inventory, itemIndex };
+}
+
+function prepareContainerContentSource(source, inventory = []) {
+  const prepared = normalizeContainerInventoryItems([source])[0];
+  if (!prepared) return null;
+  if (prepared.flags?.[MODULE_ID]) delete prepared.flags[MODULE_ID][STASH_TRANSFER_FLAG];
+  const ids = new Set(inventory.map(item => item?._id || item?.id).filter(Boolean));
+  if (!prepared._id || ids.has(prepared._id)) prepared._id = foundry.utils.randomID();
+  return prepared;
+}
+
+async function moveInlineStashContainerContentToTopLevel(partyActor, data, event) {
+  const sourceContainerStashId = data?.sourceContainerStashId;
+  const itemId = data?.itemId;
+  if (!sourceContainerStashId || !itemId) return false;
+  const context = getInlineStashContainerContext(partyActor, sourceContainerStashId, itemId);
+  if (!context || context.itemIndex < 0) return false;
+  const source = deepClone(context.inventory[context.itemIndex]);
+  if (source.flags?.[MODULE_ID]) delete source.flags[MODULE_ID][STASH_TRANSFER_FLAG];
+  if (!event?.ctrlKey) context.inventory.splice(context.itemIndex, 1);
+  context.containerSource.system.inventoryItems = context.inventory;
+  context.stash.items[context.containerIndex] = buildStashItemEntry(
+    context.stash.items[context.containerIndex],
+    context.containerSource
+  );
+  context.stash.items.push(normalizeItemForStash(source));
+  await setStash(partyActor, context.stash);
+  await renderOpenPartySheets();
+  return true;
+}
+
+async function storeDroppedItemInStashContainer(partyActor, containerStashId, data, event) {
+  data = normalizeStashDropData(data);
+  if (!partyActor || data?.type !== "Item" || !containerStashId) return false;
+  const target = getInlineStashContainerContext(partyActor, containerStashId);
+  if (!target) return false;
+
+  const transfer = gprop(data, `data.flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`)
+    ?? gprop(data, `flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`);
+  const sourceTopLevelStashId = transfer?.partyActorId === partyActor.id ? transfer.stashId : null;
+  const sourceContainerStashId = data.sourceContainerStashId || null;
+  if (sourceTopLevelStashId === containerStashId || sourceContainerStashId === containerStashId) return true;
+
+  let source = null;
+  let sourceItemDocument = null;
+  let movedInsideStash = false;
+  const stash = target.stash;
+
+  if (sourceTopLevelStashId) {
+    const sourceIndex = stash.items.findIndex(item => item.stashId === sourceTopLevelStashId);
+    if (sourceIndex < 0) return false;
+    source = getStashItemSource(stash.items[sourceIndex]);
+    if (!event?.ctrlKey) {
+      stash.items.splice(sourceIndex, 1);
+      movedInsideStash = true;
+    }
+  } else if (sourceContainerStashId && data.itemId) {
+    const sourceContext = getInlineStashContainerContext(partyActor, sourceContainerStashId, data.itemId);
+    if (!sourceContext || sourceContext.itemIndex < 0) return false;
+    source = deepClone(sourceContext.inventory[sourceContext.itemIndex]);
+    if (!event?.ctrlKey) {
+      sourceContext.inventory.splice(sourceContext.itemIndex, 1);
+      sourceContext.containerSource.system.inventoryItems = sourceContext.inventory;
+      sourceContext.stash.items[sourceContext.containerIndex] = buildStashItemEntry(
+        sourceContext.stash.items[sourceContext.containerIndex],
+        sourceContext.containerSource
+      );
+      stash.items = sourceContext.stash.items;
+      movedInsideStash = true;
+    }
+  } else {
+    const containedItem = data?.containerId && data?.itemId ? await getDroppedContainerContent(data) : null;
+    sourceItemDocument = containedItem ?? (data.uuid ? await fromUuid(data.uuid) : null);
+    source = sourceItemDocument ?? data.data;
+  }
+
+  if (!source) return false;
+  const rawSource = source.toObject ? source.toObject() : deepClone(source);
+  const sourceType = String(rawSource.type || "").toLowerCase();
+  const convertedSource = sourceType === "spell" ? await createItemFromDroppedSpell(source) : rawSource;
+  if (!convertedSource) return false;
+
+  const refreshedTargetIndex = stash.items.findIndex(item => item.stashId === containerStashId);
+  if (refreshedTargetIndex < 0) return false;
+  const targetSource = prepareStashItemSourceForPF1Sheet(stash.items[refreshedTargetIndex]);
+  const targetInventory = arrayFromMaybeObject(targetSource.system?.inventoryItems);
+  const contentSource = prepareContainerContentSource(convertedSource, targetInventory);
+  if (!contentSource) return false;
+  targetInventory.push(contentSource);
+  targetSource.system.inventoryItems = targetInventory;
+  stash.items[refreshedTargetIndex] = buildStashItemEntry(stash.items[refreshedTargetIndex], targetSource);
+  await setStash(partyActor, stash);
+
+  if (!movedInsideStash && sourceType !== "spell") {
+    const deleted = await deleteMovedSourceItem(sourceItemDocument, event, data);
+    if (data?.containerId && !deleted && !event?.ctrlKey) {
+      ui.notifications.warn("Предмет добавлен в контейнер тайника, но исходник не удалось удалить.");
+    }
+  }
+  await renderOpenPartySheets();
+  return true;
+}
+
 async function getActorFromDropData(data) {
   let source = null;
   if (data?.actorUuid) {
@@ -1835,6 +1998,8 @@ async function storeDroppedItemInPartyStash(partyActor, data, event) {
   if (!partyActor || data?.type !== "Item") return false;
   const transfer = gprop(data, `data.flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`) ?? gprop(data, `flags.${MODULE_ID}.${STASH_TRANSFER_FLAG}`);
   if (transfer?.partyActorId === partyActor.id && !data?.containerId && !data?.itemId) return true;
+
+  if (data?.sourceContainerStashId && data?.itemId && await moveInlineStashContainerContentToTopLevel(partyActor, data, event)) return true;
 
   if (data?.containerId && data?.itemId && await moveStashContainerContentToPartyStash(partyActor, data, event)) return true;
 
@@ -2105,7 +2270,7 @@ function categoryForItem(item) {
   return "equipment";
 }
 
-function buildStashView(stash) {
+function buildStashView(stash, openContainerIds = new Set()) {
   const categories = [
     { id: "weapons", label: "Оружие и щиты", items: [] },
     { id: "armor", label: "Броня/Снаряжение", items: [] },
@@ -2120,6 +2285,7 @@ function buildStashView(stash) {
 
   for (const raw of stash.items ?? []) {
     const item = getStashItemView(raw);
+    item.containerOpen = item.isContainer && openContainerIds.has(item.stashId);
     const category = byId.get(categoryForItem(item)) ?? byId.get("equipment");
     category.items.push(item);
   }
@@ -2210,10 +2376,12 @@ function actorSummary(actor, activities = {}, heroPoints = {}) {
     heroPoints: getHeroPointState(heroPoints, actor.id),
     hp: getHp(actor),
     ac: getAc(actor),
+    combat: getCombatStats(actor),
     saves: getSaves(actor),
     perception: getSkillBonus(actor, "per"),
     investedSkills,
     senses: getSenses(actor),
+    languages: getLanguages(actor),
     speed: getSpeed(actor),
     wealth: getActorWealth(actor),
     activity: {
@@ -2236,6 +2404,32 @@ function buildPartyStatsData(members, activities, stash, heroPoints = {}) {
     travel: buildTravel(members),
     partyTotals: buildPartyTotals(stash, members)
   };
+}
+
+function canCurrentUserSeeMemberPrivateData(memberId) {
+  if (game.user.isGM) return true;
+  if (game.user.character?.id === memberId) return true;
+  const actor = game.actors?.get(memberId);
+  return Boolean(actor?.testUserPermission?.(game.user, "OWNER"));
+}
+
+function applyPartyPrivacySettings(stats) {
+  if (game.user.isGM) return stats;
+  const next = deepClone(stats);
+  const hideSenses = game.settings.get(MODULE_ID, "hideOtherPlayerSenses");
+  const hideLanguages = game.settings.get(MODULE_ID, "hideOtherPlayerLanguages");
+  if (hideSenses) {
+    for (const member of next.members ?? []) {
+      if (!canCurrentUserSeeMemberPrivateData(member.id)) member.senses = "Скрыто";
+    }
+  }
+  if (hideLanguages) {
+    next.languages = [...new Set((next.members ?? [])
+      .filter(member => canCurrentUserSeeMemberPrivateData(member.id))
+      .flatMap(member => member.languages ?? []))]
+      .sort((a, b) => a.localeCompare(b, game.i18n.lang));
+  }
+  return next;
 }
 
 function getPublicPartySnapshot(partyActor) {
@@ -2294,6 +2488,34 @@ async function rollSkill(actor, skillId, { flavor = null, extraBonus = 0, dc = n
         heroPointChatBonusUsed: false
       }
     }
+  });
+}
+
+async function rollCombatCheck(actor, check, displayedBonus = 0) {
+  if (!actor) return null;
+  const ownsActor = actor.isOwner
+    || actor.testUserPermission?.(game.user, "OWNER")
+    || actor.testUserPermission?.(game.user, 3)
+    || false;
+
+  if (ownsActor && check === "cmb" && typeof actor.rollCMB === "function") {
+    return actor.rollCMB({ event: null });
+  }
+  if (ownsActor && ["melee", "ranged"].includes(check) && typeof actor.rollAttack === "function") {
+    return actor.rollAttack({ melee: check === "melee", event: null });
+  }
+
+  const labels = {
+    cmb: "МБМ",
+    melee: "Ближний бой",
+    ranged: "Дистанционный бой"
+  };
+  const bonus = toNumber(displayedBonus, 0);
+  const formula = bonus >= 0 ? `1d20 + ${bonus}` : `1d20 - ${Math.abs(bonus)}`;
+  const roll = await new Roll(formula).roll({ async: true });
+  return roll.toMessage({
+    speaker: ChatMessage.getSpeaker({ actor }),
+    flavor: `${actor.name}: ${labels[check] ?? "Боевая проверка"}`
   });
 }
 
@@ -2646,6 +2868,7 @@ class PF1PartyActorSheet extends ActorSheet {
     super(...args);
     this._stashQuantityState = new Map();
     this._stashQuantityTimers = new Map();
+    this._openStashContainers = new Set();
   }
 
   static get defaultOptions() {
@@ -2705,7 +2928,8 @@ class PF1PartyActorSheet extends ActorSheet {
     const liveStats = buildPartyStatsData(members, activities, stash, heroPoints);
     if (game.user.isGM && !getPublicPartySnapshot(this.actor)) schedulePublicPartySnapshotRefresh(this.actor);
     const publicStats = getPublicPartySnapshot(this.actor);
-    const stats = !game.user.isGM && metagame.showPartyStats && publicStats?.members?.length ? publicStats : liveStats;
+    const rawStats = !game.user.isGM && metagame.showPartyStats && publicStats?.members?.length ? publicStats : liveStats;
+    const stats = applyPartyPrivacySettings(rawStats);
     const skills = stats.skills.filter(isPartyOverviewSkill).map(withSkillTone);
     const knowledgeSkills = stats.skills.filter(isKnowledgeSkill).map(withSkillTone);
 
@@ -2718,6 +2942,7 @@ class PF1PartyActorSheet extends ActorSheet {
         tokenImg: gprop(this.actor, "prototypeToken.texture.src") || this.actor.img || PARTY_ICON,
         permissionLabel: "Настройки",
         portraitClass: `pf1-portraits-${game.settings.get(MODULE_ID, "memberPortraitStyle") || "pf2e"}`,
+        heroPointsEnabled: heroPointsEnabled(),
         moduleVersion: MODULE_VERSION_LABEL
       },
       members: stats.members,
@@ -2727,7 +2952,7 @@ class PF1PartyActorSheet extends ActorSheet {
       skillGroups: buildSkillGroups(skills, isBackgroundPartySkill),
       knowledgeGroups: buildSkillGroups(knowledgeSkills, isBackgroundKnowledgeSkill),
       travel: stats.travel,
-      stash: buildStashView(stash),
+      stash: buildStashView(stash, this._openStashContainers),
       stashTotals: buildStashTotals(stash),
       partyTotals: stats.partyTotals
     }, { inplace: false });
@@ -2739,6 +2964,13 @@ class PF1PartyActorSheet extends ActorSheet {
     html.find(".pf1-party-token-drag").on("dragstart", event => this._onPartyTokenDragStart(event));
 
     html.find(".pf1-party-item").on("dragstart", event => this._onStashItemDragStart(event));
+    html.find(".pf1-stash-container-item").on("dragstart", event => this._onStashContainerItemDragStart(event));
+    html.find(".pf1-stash-container-contents").on("dragover", event => {
+      event.preventDefault();
+      const nativeEvent = event.originalEvent ?? event;
+      if (nativeEvent.dataTransfer) nativeEvent.dataTransfer.dropEffect = nativeEvent.ctrlKey ? "copy" : "move";
+    });
+    html.find(".pf1-stash-container-contents").on("drop", event => this._onStashContainerDrop(event));
     html.find(".pf1-stash-item").on("click", event => this._onStashItemClick(event));
     html.find(".pf1-stash-item").on("contextmenu", event => this._onStashItemContext(event));
     html.find(".pf1-currency-input").on("keydown", event => {
@@ -2755,6 +2987,13 @@ class PF1PartyActorSheet extends ActorSheet {
       }
     });
     html.find(".pf1-stash-field").on("blur", event => this._onStashFieldInput(event));
+    html.find(".pf1-stash-container-field").on("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+    });
+    html.find(".pf1-stash-container-field").on("blur", event => this._onStashContainerFieldInput(event));
     html.find(".pf1-stash-price input").on("mouseenter focus", event => this._showStashPriceEach(event));
     html.find(".pf1-stash-price input").on("mouseleave", event => this._restoreStashPriceTotal(event));
     html.find(".pf1-hero-points").on("contextmenu", event => this._onHeroPointContext(event));
@@ -2807,7 +3046,9 @@ class PF1PartyActorSheet extends ActorSheet {
       const target = nativeEvent?.target instanceof Element ? nativeEvent.target : event.currentTarget;
       if (!target?.closest?.(".pf1-party-stash-main")) return;
       event.preventDefault();
-      await storeDroppedItemInPartyStash(this.actor, data, event);
+      const container = target.closest?.(".pf1-stash-container-contents[data-container-stash-id]");
+      if (container) await storeDroppedItemInStashContainer(this.actor, container.dataset.containerStashId, data, nativeEvent);
+      else await storeDroppedItemInPartyStash(this.actor, data, nativeEvent);
       this._renderPreservingScroll();
       return;
     }
@@ -2824,6 +3065,7 @@ class PF1PartyActorSheet extends ActorSheet {
 
 
   _onStashItemDragStart(event) {
+    if ($(event.target).closest(".pf1-stash-container-item").length) return;
     const stashId = event.currentTarget.dataset.itemId;
     const stash = getStash(this.actor);
     const item = stash.items.find(i => i.stashId === stashId);
@@ -2839,6 +3081,53 @@ class PF1PartyActorSheet extends ActorSheet {
       name: source.name || item.name,
       img: source.img || item.img
     }));
+  }
+
+  _onStashContainerItemDragStart(event) {
+    const nativeEvent = event.originalEvent ?? event;
+    if ($(nativeEvent.target).closest("button, input, label, [data-action]").length) {
+      nativeEvent.preventDefault();
+      return;
+    }
+    event.stopPropagation();
+    nativeEvent.stopPropagation?.();
+    const row = event.currentTarget;
+    const containerStashId = row.dataset.containerStashId;
+    const itemId = row.dataset.itemId;
+    const context = getInlineStashContainerContext(this.actor, containerStashId, itemId);
+    if (!context || context.itemIndex < 0) return;
+    const source = deepClone(context.inventory[context.itemIndex]);
+    delete source._id;
+    source.flags = source.flags || {};
+    source.flags[MODULE_ID] = source.flags[MODULE_ID] || {};
+    source.flags[MODULE_ID][STASH_TRANSFER_FLAG] = {
+      partyActorId: this.actor.id,
+      containerStashId,
+      itemId
+    };
+    nativeEvent.dataTransfer?.clearData?.();
+    writeDragData(nativeEvent.dataTransfer, {
+      type: "Item",
+      sourceContainerStashId: containerStashId,
+      itemId,
+      name: source.name,
+      img: source.img,
+      data: source
+    });
+  }
+
+  async _onStashContainerDrop(event) {
+    const nativeEvent = event.originalEvent ?? event;
+    nativeEvent.preventDefault();
+    nativeEvent.stopPropagation();
+    nativeEvent.stopImmediatePropagation?.();
+    nativeEvent._pf1PartyStashHandled = true;
+    const data = getPartyDropData(nativeEvent);
+    if (data?.type !== "Item") return;
+    const containerStashId = event.currentTarget.dataset.containerStashId;
+    await storeDroppedItemInStashContainer(this.actor, containerStashId, data, nativeEvent);
+    this._openStashContainers.add(containerStashId);
+    this._renderPreservingScroll();
   }
 
   async _onStashItemClick(event) {
@@ -3081,6 +3370,47 @@ class PF1PartyActorSheet extends ActorSheet {
     this._renderPreservingScroll();
   }
 
+  async _onStashContainerFieldInput(event) {
+    const input = event.currentTarget;
+    if (input.dataset.field === "price") input.closest(".pf1-stash-price")?.classList.remove("is-editing-each");
+    await this._updateStashContainerItemField(
+      input.dataset.containerStashId,
+      input.dataset.itemId,
+      input.dataset.field,
+      input.value
+    );
+    this._renderPreservingScroll();
+  }
+
+  async _updateStashContainerItemField(containerStashId, itemId, field, rawValue, { delta = false } = {}) {
+    const context = getInlineStashContainerContext(this.actor, containerStashId, itemId);
+    if (!context || context.itemIndex < 0) return;
+    const source = ensureItemSourceBasics(deepClone(context.inventory[context.itemIndex]), context.inventory[context.itemIndex]);
+    const quantity = getItemQuantity(source);
+
+    if (field === "quantity") {
+      const next = delta
+        ? quantity + Math.floor(toNumber(rawValue, 0))
+        : Math.floor(toNumber(rawValue, quantity));
+      setItemQuantity(source, Math.max(0, next));
+    } else if (field === "price") {
+      setItemPriceGpEach(source, Math.max(0, toNumber(rawValue, getItemPriceGpEach(source))));
+    } else if (field === "weight") {
+      const totalWeight = Math.max(0, toNumber(rawValue, getItemWeightEach(source) * Math.max(1, quantity)));
+      setItemWeightEach(source, quantity > 0 ? totalWeight / quantity : totalWeight);
+    } else {
+      return;
+    }
+
+    context.inventory[context.itemIndex] = source;
+    context.containerSource.system.inventoryItems = context.inventory;
+    context.stash.items[context.containerIndex] = buildStashItemEntry(
+      context.stash.items[context.containerIndex],
+      context.containerSource
+    );
+    await setStash(this.actor, context.stash);
+  }
+
   _changeStashQuantity(stashId, delta, { row = null } = {}) {
     const stash = getStash(this.actor);
     const item = stash.items.find(i => i.stashId === stashId);
@@ -3142,7 +3472,9 @@ class PF1PartyActorSheet extends ActorSheet {
     const action = button.dataset.action;
     const actorId = button.dataset.actorId;
     const actor = actorId ? game.actors.get(actorId) : null;
-    if (button.dataset.itemId && action !== "change-stash-quantity") await this._saveQueuedStashQuantity(button.dataset.itemId);
+    if (button.dataset.itemId && !["change-stash-quantity", "change-stash-container-quantity"].includes(action)) {
+      await this._saveQueuedStashQuantity(button.dataset.itemId);
+    }
 
     switch (action) {
       case "rename-party":
@@ -3174,6 +3506,9 @@ class PF1PartyActorSheet extends ActorSheet {
           });
         }
         break;
+      case "roll-combat-check":
+        if (actor) await rollCombatCheck(actor, button.dataset.check, button.dataset.bonus);
+        break;
       case "set-activity":
         await this._setActivity(actor);
         break;
@@ -3204,6 +3539,18 @@ class PF1PartyActorSheet extends ActorSheet {
       case "split-stash-item":
         await this._splitStashItem(button.dataset.itemId);
         break;
+      case "toggle-stash-container": {
+        const stashId = button.dataset.itemId;
+        const row = button.closest(".pf1-stash-item");
+        const open = !row?.classList.contains("is-container-open");
+        row?.classList.toggle("is-container-open", open);
+        button.setAttribute("aria-expanded", String(open));
+        button.querySelector("i")?.classList.toggle("fa-chevron-down", open);
+        button.querySelector("i")?.classList.toggle("fa-chevron-right", !open);
+        if (open) this._openStashContainers.add(stashId);
+        else this._openStashContainers.delete(stashId);
+        return;
+      }
       case "edit-stash-item":
         await this._openStashItem(button.dataset.itemId);
         return;
@@ -3211,6 +3558,16 @@ class PF1PartyActorSheet extends ActorSheet {
         this._changeStashQuantity(button.dataset.itemId, toNumber(button.dataset.delta, 0), {
           row: $(button).closest(".pf1-stash-item")
         });
+        return;
+      case "change-stash-container-quantity":
+        await this._updateStashContainerItemField(
+          button.dataset.containerStashId,
+          button.dataset.itemId,
+          "quantity",
+          button.dataset.delta,
+          { delta: true }
+        );
+        this._renderPreservingScroll();
         return;
       case "take-item":
         await this._takeItem(button.dataset.itemId);
@@ -3784,6 +4141,7 @@ function getChatMessageRollTotal(message) {
 }
 
 function canUseHeroPointOnChatMessage(message) {
+  if (!heroPointsEnabled()) return false;
   if (!message || message.getFlag?.(MODULE_ID, "heroPointChatBonusUsed")) return false;
   if (message.getFlag?.(MODULE_ID, "heroPointPreBonusUsed")) return false;
   if (getChatMessageRollTotal(message) === null) return false;
@@ -3842,6 +4200,12 @@ function actorIsInParty(actor, party = getPartyActor()) {
 }
 
 function injectActorSheetHeroPoints(app, html) {
+  if (!heroPointsEnabled()) {
+    const disabledRoot = html?.jquery ? html : $(html ?? app?.element);
+    disabledRoot.find(".pf1-actor-hero-points").remove();
+    disabledRoot.find(".pf1-actor-name-hero-wrap").removeClass("pf1-actor-name-hero-wrap");
+    return;
+  }
   const actor = app?.actor ?? app?.object;
   const party = getPartyActor();
   if (!actorIsInParty(actor, party)) return;
@@ -3968,6 +4332,7 @@ function isHeroPointRollButton(element) {
 }
 
 function injectHeroPointRollDialog(app, html) {
+  if (!heroPointsEnabled()) return;
   const root = html?.jquery ? html : $(html);
   if (root.find(".pf1-hero-roll-toggle").length) return;
   if (!/base dice|take 10|take 20|обычн|базов/i.test(root.text())) return;
@@ -4023,18 +4388,68 @@ Hooks.once("init", () => {
     name: "Автоматически добавлять назначенных персонажей игроков",
     hint: "В обзор партии попадут персонажи, выбранные у игроков в поле Character.",
     scope: "world",
-    config: true,
+    config: false,
     type: Boolean,
-    default: true
+    default: false
   });
 
   game.settings.register(MODULE_ID, "autoOwnedCharacters", {
     name: "ГМу автоматически видеть всех персонажей игроков",
     hint: "Для ГМа в партию будут добавлены все персонажи, которыми владеет хотя бы один игрок.",
     scope: "world",
+    config: false,
+    type: Boolean,
+    default: false
+  });
+
+  game.settings.register(MODULE_ID, "hideOtherPlayerSenses", {
+    name: "Скрывать чувства других персонажей от игроков",
+    hint: "Игрок видит чувства только своих персонажей. Мастеру чувства всех участников видны всегда.",
+    scope: "world",
     config: true,
     type: Boolean,
-    default: true
+    default: false,
+    onChange: () => renderOpenPartySheets()
+  });
+
+  game.settings.register(MODULE_ID, "hideOtherPlayerLanguages", {
+    name: "Скрывать языки других персонажей от игроков",
+    hint: "Игрок видит в языках партии только языки своих персонажей. Мастеру языки всех участников видны всегда.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+    onChange: () => renderOpenPartySheets()
+  });
+
+  game.settings.register(MODULE_ID, "heroPointsEnabled", {
+    name: "Использовать геройские очки",
+    hint: "Отключает геройские очки, их элементы интерфейса и действия в бросках.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: () => {
+      renderOpenPartySheets();
+      for (const app of Object.values(ui.windows ?? {})) {
+        if (app?.actor && actorIsInParty(app.actor)) app.render(false);
+      }
+    }
+  });
+
+  game.settings.register(MODULE_ID, "heroPointsMax", {
+    name: "Максимум геройских очков",
+    hint: "Количество ячеек геройских очков у каждого участника партии.",
+    scope: "world",
+    config: true,
+    type: Number,
+    range: { min: 1, max: 3, step: 1 },
+    default: HERO_POINTS_MAX_DEFAULT,
+    onChange: () => {
+      renderOpenPartySheets();
+      for (const actorId of Object.keys(getHeroPoints(getPartyActor()))) refreshHeroPointControls(actorId);
+      schedulePublicPartySnapshotRefresh();
+    }
   });
 
   game.settings.register(MODULE_ID, "folderButtonStyle", {
@@ -4116,7 +4531,11 @@ Hooks.once("ready", () => {
     const app = appId ? ui.windows?.[appId] : null;
     const party = app instanceof PF1PartyActorSheet ? app.actor : getPartyActor();
     if (!party) return;
-    storeDroppedItemInPartyStash(party, data, event).catch(err => console.warn(`${MODULE_ID} | Manual stash drop failed`, err));
+    const container = target.closest(".pf1-stash-container-contents[data-container-stash-id]");
+    const operation = container
+      ? storeDroppedItemInStashContainer(party, container.dataset.containerStashId, data, event)
+      : storeDroppedItemInPartyStash(party, data, event);
+    operation.catch(err => console.warn(`${MODULE_ID} | Manual stash drop failed`, err));
   }, true);
 });
 Hooks.on("getChatLogEntryContext", (html, options) => {
@@ -4160,10 +4579,23 @@ Hooks.on("createItem", async (item, options, userId) => {
   if (transfer && item.parent?.documentName === "Actor" && item.parent.id !== transfer.partyActorId && game.user.id === userId) {
     const party = game.actors.get(transfer.partyActorId);
     if (party && party.testUserPermission(game.user, "OWNER")) {
-      const stash = getStash(party);
-      const before = stash.items.length;
-      stash.items = stash.items.filter(i => i.stashId !== transfer.stashId);
-      if (stash.items.length !== before) await setStash(party, stash);
+      if (transfer.containerStashId && transfer.itemId) {
+        const context = getInlineStashContainerContext(party, transfer.containerStashId, transfer.itemId);
+        if (context && context.itemIndex >= 0) {
+          context.inventory.splice(context.itemIndex, 1);
+          context.containerSource.system.inventoryItems = context.inventory;
+          context.stash.items[context.containerIndex] = buildStashItemEntry(
+            context.stash.items[context.containerIndex],
+            context.containerSource
+          );
+          await setStash(party, context.stash);
+        }
+      } else if (transfer.stashId) {
+        const stash = getStash(party);
+        const before = stash.items.length;
+        stash.items = stash.items.filter(i => i.stashId !== transfer.stashId);
+        if (stash.items.length !== before) await setStash(party, stash);
+      }
     }
     if (item.isOwner && typeof item.unsetFlag === "function") await item.unsetFlag(MODULE_ID, STASH_TRANSFER_FLAG).catch(() => {});
   }

@@ -7449,21 +7449,6 @@ a.pf1-folder-open-party-button.is-circle .pf1-folder-open-party-icon img {
   line-height: 1 !important;
 }
 
-.window-app.pf1-party-folder .pf1-stash-quantity {
-  gap: .18rem !important;
-  min-width: 4.35rem !important;
-}
-
-.window-app.pf1-party-folder .pf1-stash-quantity-input,
-.window-app.pf1-party-folder .pf1-stash-quantity:hover .pf1-stash-quantity-input,
-.window-app.pf1-party-folder .pf1-stash-quantity-input:hover,
-.window-app.pf1-party-folder .pf1-stash-quantity-input:focus {
-  width: 2.15rem !important;
-  min-width: 2.15rem !important;
-  max-width: 2.15rem !important;
-  text-align: center !important;
-}
-
 #context-menu .pf1-hero-point-context-icon,
 #context-menu .context-item .pf1-hero-point-context-icon,
 #context-menu li .pf1-hero-point-context-icon {
@@ -8757,4 +8742,408 @@ a.pf1-folder-open-party-button.is-circle .pf1-folder-open-party-icon img {
   letter-spacing: 0 !important;
   text-transform: uppercase !important;
   font-stretch: condensed !important;
+}
+
+/* 1.5.8 overview combat summaries and inline stash containers. */
+.window-app.pf1-party-folder .pf1-member-combat-tags {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: .18rem !important;
+  margin: .18rem 0 !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags > span {
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: .2rem !important;
+  min-height: 1.25rem !important;
+  padding: 0 .3rem !important;
+  border: 1px solid #75675d !important;
+  background: rgba(117, 103, 93, .08) !important;
+  color: #3f3834 !important;
+  font: 700 var(--font-size-12)/1.2rem var(--sans-serif-condensed) !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags b {
+  color: #1f2d73 !important;
+  font-weight: 900 !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-item {
+  flex-wrap: wrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-toggle {
+  flex: 0 0 1rem !important;
+  width: 1rem !important;
+  min-width: 1rem !important;
+  height: 1.5rem !important;
+  min-height: 1.5rem !important;
+  padding: 0 !important;
+  color: #4d433d !important;
+  font-size: var(--font-size-10) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-item-name small {
+  flex: 0 0 auto !important;
+  min-width: 1.15rem !important;
+  color: rgba(63, 56, 52, .65) !important;
+  font: 700 var(--font-size-10)/1 var(--sans-serif) !important;
+  text-align: center !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-contents {
+  display: none !important;
+  flex: 1 0 100% !important;
+  width: 100% !important;
+  min-height: 1.7rem !important;
+  margin: 0 !important;
+  padding: .2rem .25rem .25rem 1.75rem !important;
+  border-top: 1px solid rgba(117, 103, 93, .25) !important;
+  background: rgba(206, 194, 174, .24) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-item.is-container-open > .pf1-stash-container-contents {
+  display: block !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-contents:hover {
+  background: rgba(197, 181, 147, .38) !important;
+  box-shadow: inset 0 0 0 1px rgba(117, 103, 93, .32) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item {
+  display: grid !important;
+  grid-template-columns: 1.35rem minmax(0, 1fr) 3rem 4.25rem !important;
+  align-items: center !important;
+  min-height: 1.5rem !important;
+  border-bottom: 1px solid rgba(117, 103, 93, .18) !important;
+  cursor: grab !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item:last-child {
+  border-bottom: 0 !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item img {
+  width: 1.25rem !important;
+  height: 1.25rem !important;
+  margin: 0 !important;
+  border: 0 !important;
+  object-fit: contain !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-name {
+  overflow: hidden !important;
+  padding: 0 .25rem !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-quantity,
+.window-app.pf1-party-folder .pf1-stash-container-item-weight {
+  color: #514842 !important;
+  font-size: var(--font-size-11) !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-empty {
+  color: rgba(63, 56, 52, .62) !important;
+  font: italic var(--font-size-11)/1.4 var(--sans-serif) !important;
+}
+
+/* 1.5.9 PF2e-style defenses, combat checks, and nested stash rows. */
+.window-app.pf1-party-folder .pf1-party-statline {
+  gap: .35rem !important;
+}
+
+.window-app.pf1-party-folder .pf1-ac-group {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  align-items: stretch !important;
+  gap: .2rem !important;
+  height: 2.625rem !important;
+}
+
+.window-app.pf1-party-folder .pf1-ac-group .pf1-ac {
+  display: flex !important;
+  flex: 0 0 3.1rem !important;
+  width: 3.1rem !important;
+  height: 2.625rem !important;
+  min-height: 2.625rem !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-direction: column !important;
+}
+
+.window-app.pf1-party-folder .pf1-ac-group .pf1-ac span {
+  max-width: 2.7rem !important;
+  overflow: hidden !important;
+  font-size: var(--font-size-9) !important;
+  line-height: 1 !important;
+  text-align: center !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-ac-group .pf1-ac strong {
+  font-size: var(--font-size-18) !important;
+  line-height: 1.05 !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: stretch !important;
+  gap: .22rem !important;
+  margin: .18rem 0 !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags .pf1-combat-check {
+  display: inline-flex !important;
+  min-width: 4.1rem !important;
+  min-height: 2.15rem !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-direction: column !important;
+  padding: .12rem .42rem !important;
+  border: 1px solid var(--color-border, #9d9188) !important;
+  border-radius: 2px !important;
+  background: rgba(255, 255, 255, .14) !important;
+  color: var(--text-dark, #3f3834) !important;
+  box-shadow: none !important;
+  text-align: center !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags .pf1-combat-check span {
+  font: 600 var(--font-size-10)/1 var(--sans-serif) !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags .pf1-combat-check strong {
+  color: var(--color-proficiency-expert, #171f69) !important;
+  font: 600 var(--font-size-18)/1 var(--sans-serif) !important;
+}
+
+/* 1.6.0 complete AC labels and party combat rolls. */
+.window-app.pf1-party-folder .pf1-ac-group .pf1-ac span {
+  max-width: none !important;
+  overflow: visible !important;
+  font-size: 8px !important;
+  text-overflow: clip !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags button.pf1-combat-check {
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  font-family: inherit !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags .pf1-combat-check.is-rollable {
+  cursor: pointer !important;
+}
+
+.window-app.pf1-party-folder .pf1-member-combat-tags .pf1-combat-check.is-rollable:hover,
+.window-app.pf1-party-folder .pf1-member-combat-tags .pf1-combat-check.is-rollable:focus-visible {
+  border-color: var(--color-proficiency-expert, #171f69) !important;
+  background: rgba(23, 31, 105, .08) !important;
+  box-shadow: 0 0 0 1px rgba(23, 31, 105, .16) !important;
+  color: var(--text-dark, #3f3834) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-contents {
+  position: relative !important;
+  margin: 0 !important;
+  padding: 0 0 0 .75rem !important;
+  border-top: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-contents:hover {
+  background: rgba(120, 100, 82, .035) !important;
+  box-shadow: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) var(--pf1-inventory-price) var(--pf1-inventory-quantity) var(--pf1-inventory-bulk) var(--pf1-inventory-controls) !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-height: 1.625rem !important;
+  padding: 0 !important;
+  border-bottom: 1px solid rgba(120, 100, 82, .22) !important;
+  background: transparent !important;
+  color: var(--text-dark) !important;
+  font: 400 var(--font-size-12)/1.25rem var(--sans-serif) !important;
+  cursor: grab !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item:nth-child(even) {
+  background: rgba(120, 100, 82, .1) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item::before,
+.window-app.pf1-party-folder .pf1-stash-container-item::after {
+  position: absolute !important;
+  left: -.48rem !important;
+  content: "" !important;
+  pointer-events: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item::before {
+  top: 0 !important;
+  bottom: 0 !important;
+  border-left: 1px solid rgba(117, 103, 93, .65) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item::after {
+  top: 50% !important;
+  width: .48rem !important;
+  border-top: 1px solid rgba(117, 103, 93, .65) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item:last-child::before {
+  bottom: 50% !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-name {
+  display: flex !important;
+  min-width: 0 !important;
+  align-items: center !important;
+  gap: .25rem !important;
+  overflow: hidden !important;
+  padding: 0 .25rem 0 0 !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-name img {
+  flex: 0 0 1.5rem !important;
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  object-fit: contain !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-name span {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-price,
+.window-app.pf1-party-folder .pf1-stash-container-item-quantity,
+.window-app.pf1-party-folder .pf1-stash-container-item-weight {
+  color: #514842 !important;
+  font-size: var(--font-size-11) !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item-weight {
+  grid-column: 4 !important;
+}
+
+/* 1.6.1 inline editing for items stored inside stash containers. */
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-field {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 1.35rem !important;
+  padding: 0 .12rem !important;
+  border: 1px solid transparent !important;
+  border-radius: 1px !important;
+  background: transparent !important;
+  color: #514842 !important;
+  font: 400 var(--font-size-11)/1.2 var(--sans-serif) !important;
+  text-align: center !important;
+  box-shadow: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-field:hover,
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-field:focus {
+  border-color: rgba(81, 72, 66, .65) !important;
+  background: rgba(255, 255, 255, .34) !important;
+  outline: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-price,
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-weight {
+  display: flex !important;
+  min-width: 0 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: .08rem !important;
+  padding: 0 .1rem !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-price span,
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-weight span {
+  flex: 0 0 auto !important;
+  font-size: var(--font-size-10) !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-quantity {
+  display: grid !important;
+  grid-template-columns: .75rem 1.55rem .75rem !important;
+  column-gap: .12rem !important;
+  align-items: center !important;
+  justify-self: center !important;
+  width: 3.29rem !important;
+  min-width: 0 !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-quantity input {
+  box-sizing: border-box !important;
+  width: 1.55rem !important;
+  min-width: 1.55rem !important;
+  max-width: 1.55rem !important;
+  text-align: center !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-quantity button {
+  width: .75rem !important;
+  min-width: .75rem !important;
+  height: 1.35rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: #514842 !important;
+  font: 600 var(--font-size-11)/1 var(--sans-serif) !important;
+  box-shadow: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-item .pf1-stash-container-item-quantity button:hover {
+  opacity: .55 !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-item > .pf1-stash-quantity {
+  gap: .16rem !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-item > .pf1-stash-quantity > .pf1-stash-quantity-input,
+.window-app.pf1-party-folder .pf1-stash-item > .pf1-stash-quantity:hover > .pf1-stash-quantity-input,
+.window-app.pf1-party-folder .pf1-stash-item > .pf1-stash-quantity > .pf1-stash-quantity-input:hover,
+.window-app.pf1-party-folder .pf1-stash-item > .pf1-stash-quantity > .pf1-stash-quantity-input:focus {
+  flex: 0 0 1.7rem !important;
+  width: 1.7rem !important;
+  min-width: 1.7rem !important;
+  max-width: 1.7rem !important;
+  text-align: center !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-container-empty {
+  position: relative !important;
+  min-height: 1.625rem !important;
+  padding: .15rem .35rem !important;
 }

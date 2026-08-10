@@ -100,24 +100,37 @@
             <div class="pf1-party-member-main">
               <div class="pf1-party-member-header">
                 <div class="pf1-party-member-name">{{name}} <span class="pf1-remove-member" data-action="remove-member" data-actor-id="{{id}}" title="Убрать из партии">×</span></div>
-                <a class="pf1-hero-points" data-action="adjust-hero-points" data-actor-id="{{id}}" title="Геройские очки: {{heroPoints.value}} / {{heroPoints.max}}. ЛКМ +1, ПКМ −1. Shift+клик по броску: +8 перед броском.">
-                  {{#each heroPoints.pips}}
-                    {{#if filled}}
-                      <img class="pf1-hero-point-pip is-filled" data-index="{{index}}" src="{{../heroPoints.icon}}" alt="">
-                    {{else}}
-                      <span class="pf1-hero-point-pip is-empty" data-index="{{index}}"></span>
-                    {{/if}}
-                  {{/each}}
-                </a>
+                {{#if heroPoints.enabled}}
+                  <a class="pf1-hero-points" data-action="adjust-hero-points" data-actor-id="{{id}}" title="Геройские очки: {{heroPoints.value}} / {{heroPoints.max}}. ЛКМ +1, ПКМ −1. Shift+клик по броску: +8 перед броском.">
+                    {{#each heroPoints.pips}}
+                      {{#if filled}}
+                        <img class="pf1-hero-point-pip is-filled" data-index="{{index}}" src="{{../heroPoints.icon}}" alt="">
+                      {{else}}
+                        <span class="pf1-hero-point-pip is-empty" data-index="{{index}}"></span>
+                      {{/if}}
+                    {{/each}}
+                  </a>
+                {{/if}}
               </div>
               <div class="pf1-party-statline">
-                <div class="pf1-ac"><span>КБ</span><strong>{{ac}}</strong></div>
+                <section class="pf1-ac-group">
+                  <div class="pf1-ac"><span>КБ</span><strong>{{ac}}</strong></div>
+                  <div class="pf1-ac"><span>Касание</span><strong>{{combat.ac.touch}}</strong></div>
+                  <div class="pf1-ac"><span>Врасплох</span><strong>{{combat.ac.flatFooted}}</strong></div>
+                </section>
                 <section class="pf1-saving-throws">
                   <div class="pf1-save"><span>Стойкость</span><strong>{{signed saves.fort}}</strong></div>
                   <div class="pf1-save"><span>Реакция</span><strong>{{signed saves.ref}}</strong></div>
                   <div class="pf1-save"><span>Воля</span><strong>{{signed saves.will}}</strong></div>
                 </section>
                 <div class="pf1-senses"><span>Чувства</span><strong>{{senses}}</strong></div>
+              </div>
+              <div class="pf1-member-combat-tags">
+                <div class="pf1-combat-check" title="Базовый модификатор атаки"><span>БМА</span><strong>{{signed combat.bab}}</strong></div>
+                <div class="pf1-combat-check" title="Защита от боевых манёвров"><span>ЗБМ</span><strong>{{combat.cmd}}</strong></div>
+                <button type="button" class="pf1-combat-check is-rollable" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="cmb" data-bonus="{{combat.cmb}}" title="Бросить проверку боевого манёвра"><span>МБМ</span><strong>{{signed combat.cmb}}</strong></button>
+                <button type="button" class="pf1-combat-check is-rollable" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="melee" data-bonus="{{combat.melee}}" title="Бросить атаку ближнего боя"><span>Ближний бой</span><strong>{{signed combat.melee}}</strong></button>
+                <button type="button" class="pf1-combat-check is-rollable" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="ranged" data-bonus="{{combat.ranged}}" title="Бросить дистанционную атаку"><span>Дистанционный бой</span><strong>{{signed combat.ranged}}</strong></button>
               </div>
               <div class="pf1-member-skill-tags">
                 <button type="button" class="pf1-perception" data-action="roll-skill" data-actor-id="{{id}}" data-skill-id="per" title="Shift+клик: геройское очко +8 перед броском">Внимание {{signed perception}}</button>
@@ -243,8 +256,9 @@
                 </summary>
                 <div class="pf1-stash-item-list {{#unless items.length}}is-empty{{/unless}}">
                   {{#each items}}
-                    <div class="pf1-stash-item pf1-party-item {{#if emptyStack}}is-empty-stack{{/if}}" data-item-id="{{stashId}}" data-search="{{search}}" draggable="true">
+                    <div class="pf1-stash-item pf1-party-item {{#if emptyStack}}is-empty-stack{{/if}} {{#if isContainer}}is-container{{/if}} {{#if containerOpen}}is-container-open{{/if}}" data-item-id="{{stashId}}" data-search="{{search}}" draggable="true">
                       <div class="pf1-stash-item-name">
+                        {{#if isContainer}}<button type="button" class="pf1-stash-container-toggle" data-action="toggle-stash-container" data-item-id="{{stashId}}" aria-expanded="{{containerOpen}}" title="Показать содержимое"><i class="fas {{#if containerOpen}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i></button>{{/if}}
                         <img src="{{img}}" alt="{{name}}">
                         <span>{{name}}</span>
                       </div>
@@ -262,6 +276,24 @@
                         <button type="button" data-action="delete-stash-item" data-item-id="{{stashId}}" title="Удалить"><i class="fas fa-trash"></i></button>
                       </div>
                       <div class="pf1-stash-item-description">{{{description}}}</div>
+                      {{#if isContainer}}
+                        <div class="pf1-stash-container-contents" data-container-stash-id="{{stashId}}">
+                          {{#each containerItems}}
+                            <div class="pf1-stash-container-item" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" data-search="{{search}}" draggable="true">
+                              <div class="pf1-stash-container-item-name"><img src="{{img}}" alt="{{name}}"><span>{{name}}</span></div>
+                              <label class="pf1-stash-price pf1-stash-container-item-price" title="Наведи или нажми, чтобы изменить цену за штуку"><input type="text" class="pf1-stash-container-field" data-field="price" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" data-price-each="{{priceEach}}" data-price-total="{{priceGp}}" value="{{priceGp}}"><span>зм</span></label>
+                              <span class="pf1-stash-quantity pf1-stash-container-item-quantity" title="Кнопки меняют количество">
+                                <button type="button" data-action="change-stash-container-quantity" data-delta="-1" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" title="Убавить количество">−</button>
+                                <input type="text" inputmode="numeric" pattern="[0-9]*" class="pf1-stash-container-field pf1-stash-quantity-input" data-field="quantity" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" value="{{quantity}}">
+                                <button type="button" data-action="change-stash-container-quantity" data-delta="1" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" title="Добавить количество">+</button>
+                              </span>
+                              <label class="pf1-stash-weight pf1-stash-container-item-weight" title="Изменить вес"><input type="text" class="pf1-stash-container-field" data-field="weight" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" value="{{weight}}"><span>фнт.</span></label>
+                            </div>
+                          {{else}}
+                            <div class="pf1-stash-container-empty">Пусто</div>
+                          {{/each}}
+                        </div>
+                      {{/if}}
                     </div>
                   {{/each}}
                 </div>
