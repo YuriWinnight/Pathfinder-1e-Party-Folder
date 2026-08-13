@@ -1,0 +1,42 @@
+<form class="pf1-information-masks-form" autocomplete="off">
+  <p class="pf1-information-masks-intro">Настоящие данные остаются в листах персонажей и всегда видны мастеру. Здесь настраивается только информация в меню партии для игроков.</p>
+
+  <div class="pf1-information-masks-list">
+    {{#each members}}
+      <section class="pf1-information-mask-row">
+        <header>
+          <img src="{{img}}" alt="{{name}}">
+          <strong>{{name}}</strong>
+        </header>
+
+        <div class="pf1-information-mask-field">
+          <label for="pf1-mask-senses-{{id}}">Чувства</label>
+          <select id="pf1-mask-senses-{{id}}" name="masks.{{id}}.sensesMode" data-mask-kind="senses">
+            <option value="real" {{#if sensesReal}}selected{{/if}}>Показывать настоящие</option>
+            <option value="hidden" {{#if sensesHidden}}selected{{/if}}>Скрыть</option>
+            <option value="custom" {{#if sensesCustom}}selected{{/if}}>Показать подставные</option>
+          </select>
+          <input type="text" name="masks.{{id}}.sensesValue" value="{{sensesValue}}" data-mask-value="senses" placeholder="Что увидят игроки">
+          <small><b>Настоящие:</b> {{realSenses}}</small>
+        </div>
+
+        <div class="pf1-information-mask-field">
+          <label for="pf1-mask-languages-{{id}}">Языки</label>
+          <select id="pf1-mask-languages-{{id}}" name="masks.{{id}}.languagesMode" data-mask-kind="languages">
+            <option value="real" {{#if languagesReal}}selected{{/if}}>Показывать настоящие</option>
+            <option value="hidden" {{#if languagesHidden}}selected{{/if}}>Скрыть</option>
+            <option value="custom" {{#if languagesCustom}}selected{{/if}}>Показать подставные</option>
+          </select>
+          <input type="text" name="masks.{{id}}.languagesValue" value="{{languagesValue}}" data-mask-value="languages" placeholder="Через запятую">
+          <small><b>Настоящие:</b> {{realLanguages}}</small>
+        </div>
+      </section>
+    {{else}}
+      <p class="notes">В папке партии пока нет персонажей.</p>
+    {{/each}}
+  </div>
+
+  <footer class="sheet-footer flexrow">
+    <button type="submit"><i class="fas fa-save"></i> Сохранить</button>
+  </footer>
+</form>

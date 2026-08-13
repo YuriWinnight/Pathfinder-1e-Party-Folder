@@ -8,11 +8,12 @@ const STASH_FLAG = "stash";
 const ACTIVITIES_FLAG = "activities";
 const PUBLIC_SNAPSHOT_FLAG = "publicSnapshot";
 const HERO_POINTS_FLAG = "heroPoints";
+const MEMBER_INFORMATION_MASKS_SETTING = "memberInformationMasks";
 const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v1.6.5";
+const MODULE_VERSION_LABEL = "v1.6.6";
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
 const HERO_POINT_SAVE_DELAY_MS = 180;
 const HERO_POINT_PRE_ROLL_BONUS = 8;
@@ -2406,6 +2407,44 @@ function buildPartyStatsData(members, activities, stash, heroPoints = {}) {
   };
 }
 
+function getMemberInformationMasks() {
+  return deepClone(game.settings.get(MODULE_ID, MEMBER_INFORMATION_MASKS_SETTING) ?? {});
+}
+
+function normalizeInformationMaskEntry(entry = {}) {
+  const normalizeMode = mode => ["real", "hidden", "custom"].includes(mode) ? mode : "real";
+  return {
+    sensesMode: normalizeMode(entry.sensesMode),
+    sensesValue: String(entry.sensesValue ?? "").trim(),
+    languagesMode: normalizeMode(entry.languagesMode),
+    languagesValue: String(entry.languagesValue ?? "").trim()
+  };
+}
+
+function parseMaskedLanguages(value) {
+  return [...new Set(String(value ?? "")
+    .split(/[,;\n]+/)
+    .map(language => language.trim())
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, game.i18n.lang));
+}
+
+function applyMemberInformationMasks(stats) {
+  const next = deepClone(stats);
+  const masks = getMemberInformationMasks();
+  for (const member of next.members ?? []) {
+    const mask = normalizeInformationMaskEntry(masks[member.id]);
+    if (mask.sensesMode === "hidden") member.senses = "Скрыто";
+    else if (mask.sensesMode === "custom") member.senses = mask.sensesValue || "Без особых чувств";
+
+    if (mask.languagesMode === "hidden") member.languages = [];
+    else if (mask.languagesMode === "custom") member.languages = parseMaskedLanguages(mask.languagesValue);
+  }
+  next.languages = [...new Set((next.members ?? []).flatMap(member => member.languages ?? []))]
+    .sort((a, b) => a.localeCompare(b, game.i18n.lang));
+  return next;
+}
+
 function canCurrentUserSeeMemberPrivateData(memberId) {
   if (game.user.isGM) return true;
   if (game.user.character?.id === memberId) return true;
@@ -2424,8 +2463,10 @@ function applyPartyPrivacySettings(stats) {
     }
   }
   if (hideLanguages) {
+    for (const member of next.members ?? []) {
+      if (!canCurrentUserSeeMemberPrivateData(member.id)) member.languages = [];
+    }
     next.languages = [...new Set((next.members ?? [])
-      .filter(member => canCurrentUserSeeMemberPrivateData(member.id))
       .flatMap(member => member.languages ?? []))]
       .sort((a, b) => a.localeCompare(b, game.i18n.lang));
   }
@@ -2442,7 +2483,7 @@ async function refreshPublicPartySnapshot(partyActor = getPartyActor()) {
   const stash = getStash(partyActor);
   const heroPoints = getHeroPoints(partyActor);
   const members = getPartyMembers(partyActor, { ignorePermissions: true });
-  const snapshot = buildPartyStatsData(members, activities, stash, heroPoints);
+  const snapshot = applyMemberInformationMasks(buildPartyStatsData(members, activities, stash, heroPoints));
   const current = getPublicPartySnapshot(partyActor);
   if (JSON.stringify(current) !== JSON.stringify(snapshot)) await partyActor.setFlag(MODULE_ID, PUBLIC_SNAPSHOT_FLAG, snapshot);
   return snapshot;
@@ -2929,7 +2970,8 @@ class PF1PartyActorSheet extends ActorSheet {
     if (game.user.isGM && !getPublicPartySnapshot(this.actor)) schedulePublicPartySnapshotRefresh(this.actor);
     const publicStats = getPublicPartySnapshot(this.actor);
     const rawStats = !game.user.isGM && metagame.showPartyStats && publicStats?.members?.length ? publicStats : liveStats;
-    const stats = applyPartyPrivacySettings(rawStats);
+    const privateStats = applyPartyPrivacySettings(rawStats);
+    const stats = game.user.isGM ? privateStats : applyMemberInformationMasks(privateStats);
     const skills = stats.skills.filter(isPartyOverviewSkill).map(withSkillTone);
     const knowledgeSkills = stats.skills.filter(isKnowledgeSkill).map(withSkillTone);
 
@@ -4365,7 +4407,93 @@ function injectHeroPointRollDialog(app, html) {
   }, true);
 }
 
+class PF1MemberInformationMasksForm extends FormApplication {
+  static get defaultOptions() {
+    return mergeObject(super.defaultOptions, {
+      id: "pf1-party-member-information-masks",
+      title: "Подмена чувств и языков",
+      template: `modules/${MODULE_ID}/templates/member-information-masks.hbs`,
+      width: 720,
+      height: 680,
+      resizable: true,
+      closeOnSubmit: true
+    }, { inplace: false });
+  }
+
+  async getData(options = {}) {
+    const data = await super.getData(options);
+    const masks = getMemberInformationMasks();
+    const members = getPartyMembers(getPartyActor(), { ignorePermissions: true }).map(actor => {
+      const mask = normalizeInformationMaskEntry(masks[actor.id]);
+      return {
+        id: actor.id,
+        name: actor.name,
+        img: actor.img,
+        realSenses: getSenses(actor),
+        realLanguages: getLanguages(actor).join(", ") || "Нет языков",
+        ...mask,
+        sensesReal: mask.sensesMode === "real",
+        sensesHidden: mask.sensesMode === "hidden",
+        sensesCustom: mask.sensesMode === "custom",
+        languagesReal: mask.languagesMode === "real",
+        languagesHidden: mask.languagesMode === "hidden",
+        languagesCustom: mask.languagesMode === "custom"
+      };
+    });
+    return mergeObject(data, { members }, { inplace: false });
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+    const updateCustomFields = () => {
+      html.find(".pf1-information-mask-row").each((_index, row) => {
+        const element = $(row);
+        for (const kind of ["senses", "languages"]) {
+          const custom = element.find(`select[data-mask-kind="${kind}"]`).val() === "custom";
+          element.find(`input[data-mask-value="${kind}"]`).prop("disabled", !custom).toggleClass("is-disabled", !custom);
+        }
+      });
+    };
+    html.find("select[data-mask-kind]").on("change", updateCustomFields);
+    updateCustomFields();
+  }
+
+  async _updateObject(_event, formData) {
+    if (!game.user.isGM) return;
+    const expanded = foundry.utils.expandObject(formData);
+    const memberIds = new Set(getPartyMembers(getPartyActor(), { ignorePermissions: true }).map(actor => actor.id));
+    const masks = {};
+    for (const [actorId, entry] of Object.entries(expanded.masks ?? {})) {
+      if (!memberIds.has(actorId)) continue;
+      const mask = normalizeInformationMaskEntry(entry);
+      if (mask.sensesMode !== "real" || mask.languagesMode !== "real") masks[actorId] = mask;
+    }
+    await game.settings.set(MODULE_ID, MEMBER_INFORMATION_MASKS_SETTING, masks);
+  }
+}
+
 Hooks.once("init", () => {
+  game.settings.registerMenu(MODULE_ID, "memberInformationMasksMenu", {
+    name: "Подмена чувств и языков персонажей",
+    label: "Настроить подмену",
+    hint: "Мастер выбирает настоящие, скрытые или подставные чувства и языки отдельно для каждого участника партии.",
+    icon: "fas fa-user-secret",
+    type: PF1MemberInformationMasksForm,
+    restricted: true
+  });
+
+  game.settings.register(MODULE_ID, MEMBER_INFORMATION_MASKS_SETTING, {
+    name: "Подмена чувств и языков персонажей",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {},
+    onChange: () => {
+      renderOpenPartySheets();
+      schedulePublicPartySnapshotRefresh();
+    }
+  });
+
   game.settings.register(MODULE_ID, "partyName", {
     name: "Название партии",
     hint: "Имя актёра-партии, который появится в списке актёров.",

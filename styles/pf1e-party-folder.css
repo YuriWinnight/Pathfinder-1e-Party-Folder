@@ -8851,6 +8851,102 @@ a.pf1-folder-open-party-button.is-circle .pf1-folder-open-party-icon img {
   white-space: nowrap !important;
 }
 
+.window-app#pf1-party-member-information-masks .window-content {
+  padding: .75rem !important;
+  background: #f2efe9 !important;
+}
+
+.pf1-information-masks-form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: #3f3935;
+  font-family: var(--pf2e-ru-body-font, "Roboto", sans-serif);
+}
+
+.pf1-information-masks-intro {
+  margin: 0 0 .75rem;
+  padding: .6rem .75rem;
+  border: 1px solid #9a8d81;
+  background: rgba(255, 255, 255, .45);
+}
+
+.pf1-information-masks-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: .35rem;
+}
+
+.pf1-information-mask-row {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: .65rem;
+  margin-bottom: .65rem;
+  padding: .65rem;
+  border: 1px solid #8b7a6a;
+  background: rgba(255, 255, 255, .55);
+}
+
+.pf1-information-mask-row > header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.pf1-information-mask-row > header img {
+  width: 2.75rem;
+  height: 3.5rem;
+  border: 0;
+  object-fit: contain;
+}
+
+.pf1-information-mask-row > header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf1-information-mask-field {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: .3rem;
+  min-width: 0;
+}
+
+.pf1-information-mask-field > label {
+  font-weight: 700;
+}
+
+.pf1-information-mask-field select,
+.pf1-information-mask-field input {
+  width: 100%;
+  min-width: 0;
+  height: 1.75rem;
+}
+
+.pf1-information-mask-field input.is-disabled {
+  opacity: .45;
+}
+
+.pf1-information-mask-field small {
+  line-height: 1.25;
+  color: #655b54;
+  overflow-wrap: anywhere;
+}
+
+.pf1-information-masks-form .sheet-footer {
+  flex: 0 0 auto;
+  margin-top: .65rem;
+}
+
+@media (max-width: 680px) {
+  .pf1-information-mask-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .window-app.pf1-party-folder .pf1-stash-container-empty {
   color: rgba(63, 56, 52, .62) !important;
   font: italic var(--font-size-11)/1.4 var(--sans-serif) !important;

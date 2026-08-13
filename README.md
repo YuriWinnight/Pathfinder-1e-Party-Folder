@@ -1,5 +1,10 @@
 # PF1e Party Folder
 
+## Changes in version 1.6.6
+
+- Added a GM-only setup window for hiding or replacing each party member's senses and languages in the player-facing party menu.
+- Real actor data remains unchanged and visible to the GM.
+
 ## Changes in version 1.6.5
 
 - Increased the quantity input hit area for top-level stash items without changing nested container items.
