@@ -1,5 +1,17 @@
 # PF1e Party Folder
 
+## Changes in version 1.7.6
+
+- Party background and accent selections are stored on the current Foundry user.
+- Each player can use a different theme, including when several accounts share one browser installation.
+- Existing client theme choices are migrated to the current user on first launch.
+
+## Changes in version 1.7.5
+
+- Improved dark-theme contrast for Perception, exploration controls and empty activity slots.
+- Restored readable stash member weights, search text, item controls, and currency values.
+- Kept dark icons on the pale exploration and currency buttons.
+
 ## Changes in version 1.7.4
 
 - The spell conversion window in the stash now uses the native PF1 actor-sheet layout.

@@ -9463,3 +9463,89 @@ a.pf1-folder-open-party-button.is-circle .pf1-folder-open-party-icon img {
 .window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-saving-throws button.pf1-save:focus-visible {
   background: rgba(111, 132, 168, .14) !important;
 }
+
+/* 1.7.5 targeted contrast fixes for the dark background. */
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-perception {
+  border-color: rgba(232, 229, 219, .52) !important;
+  background: #57544f !important;
+  color: #fff !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-perception:hover,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-perception:focus-visible {
+  border-color: #9aaace !important;
+  background: #42577f !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 1px rgba(154, 170, 206, .38) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-action-bar button:not(:first-child),
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-currency-bar button {
+  border-color: #5b5040 !important;
+  background: #dfcd91 !important;
+  color: #30291f !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-action-bar button:not(:first-child) i,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-currency-bar button i,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-currency-bar button span {
+  color: #30291f !important;
+  opacity: 1 !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-currency-bar button[data-action="add-currency"] span::before,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-currency-bar button[data-action="add-currency"] span::after,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-currency-bar button[data-action="subtract-currency"] span::before {
+  background: #30291f !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-activity-add,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-exploration-main .activities .member-activity .empty .icon {
+  border-color: rgba(232, 229, 219, .56) !important;
+  background: rgba(232, 229, 219, .055) !important;
+  color: #e8e5db !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-activity-add::before,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-activity-add::after {
+  background: #e8e5db !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-stash-layout .pf1-side-table div:last-child,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-inventory-member-card .pf1-small-member-weight {
+  border-color: rgba(208, 204, 194, .26) !important;
+  background: #242522 !important;
+  color: #c8c5bc !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item-controls,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item-controls button,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item-controls button i,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-toggle,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-toggle i,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-quantity button,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item-quantity button {
+  color: #c9c6bd !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item-controls button:hover,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-toggle:hover,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-quantity button:hover {
+  color: #f1eee5 !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-search-line > i {
+  color: #c9c6bd !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-search-line input.pf1-stash-search::placeholder {
+  color: #aaa79f !important;
+  opacity: 1 !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-coin input.pf1-currency-input {
+  color: #30291f !important;
+  caret-color: #30291f !important;
+  text-shadow: none !important;
+}

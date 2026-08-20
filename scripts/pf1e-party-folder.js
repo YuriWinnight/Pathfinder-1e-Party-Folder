@@ -11,11 +11,15 @@ const HERO_POINTS_FLAG = "heroPoints";
 const MEMBER_INFORMATION_MASKS_SETTING = "memberInformationMasks";
 const RU_IMPROVEMENTS_ID = "pf1e-ru-improvements";
 const RU_IMPROVEMENTS_SCROLL_PICKER_SETTING = "enableScrollIconPicker";
+const PERSONAL_THEME_OPTIONS = Object.freeze({
+  partyThemeBackground: { fallback: "light", values: ["light", "beige", "dark"] },
+  partyThemeAccent: { fallback: "green", values: ["green", "brown", "burgundy", "blue"] }
+});
 const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v1.7.4";
+const MODULE_VERSION_LABEL = "v1.7.6";
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
 const HERO_POINT_SAVE_DELAY_MS = 180;
 const HERO_POINT_PRE_ROLL_BONUS = 8;
@@ -24,6 +28,7 @@ let publicSnapshotRefreshTimer = null;
 const pendingHeroPointUpdates = new Map();
 const heroPointSaveTimers = new Map();
 const openStashItemSources = new Map();
+const personalThemeValues = new Map();
 
 const PARTY_SCROLL_SELECTORS = [
   ".window-content",
@@ -166,6 +171,40 @@ function escapeHTML(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function normalizePersonalThemeValue(setting, value) {
+  const options = PERSONAL_THEME_OPTIONS[setting];
+  if (!options) return value;
+  return options.values.includes(value) ? value : options.fallback;
+}
+
+function getPersonalThemeValue(setting) {
+  const options = PERSONAL_THEME_OPTIONS[setting];
+  if (!options) return game.settings.get(MODULE_ID, setting);
+  if (personalThemeValues.has(setting)) return personalThemeValues.get(setting);
+  const userValue = game.user?.getFlag?.(MODULE_ID, setting);
+  if (options.values.includes(userValue)) return userValue;
+  return normalizePersonalThemeValue(setting, game.settings.get(MODULE_ID, setting));
+}
+
+async function persistPersonalThemeValue(setting, value, { render = true } = {}) {
+  const normalized = normalizePersonalThemeValue(setting, value);
+  personalThemeValues.set(setting, normalized);
+  if (render) renderOpenPartySheets();
+  if (!game.user?.setFlag || game.user.getFlag(MODULE_ID, setting) === normalized) return;
+  await game.user.setFlag(MODULE_ID, setting, normalized);
+}
+
+async function initializePersonalThemeValues() {
+  for (const [setting, options] of Object.entries(PERSONAL_THEME_OPTIONS)) {
+    const stored = game.user?.getFlag?.(MODULE_ID, setting);
+    const clientValue = normalizePersonalThemeValue(setting, game.settings.get(MODULE_ID, setting));
+    const value = options.values.includes(stored) ? stored : clientValue;
+    personalThemeValues.set(setting, value);
+    if (stored !== value && game.user?.setFlag) await game.user.setFlag(MODULE_ID, setting, value);
+    if (game.settings.get(MODULE_ID, setting) !== value) await game.settings.set(MODULE_ID, setting, value);
+  }
 }
 
 async function renderCompendiumBrowserCandidate(browser, tabNames = ["item", "items", "equipment"]) {
@@ -3249,7 +3288,7 @@ class PF1PartyActorSheet extends ActorSheet {
         tokenImg: gprop(this.actor, "prototypeToken.texture.src") || this.actor.img || PARTY_ICON,
         permissionLabel: "Настройки",
         portraitClass: `pf1-portraits-${game.settings.get(MODULE_ID, "memberPortraitStyle") || "pf2e"}`,
-        themeClass: `pf1-theme-bg-${game.settings.get(MODULE_ID, "partyThemeBackground") || "light"} pf1-theme-accent-${game.settings.get(MODULE_ID, "partyThemeAccent") || "green"}`,
+        themeClass: `pf1-theme-bg-${getPersonalThemeValue("partyThemeBackground")} pf1-theme-accent-${getPersonalThemeValue("partyThemeAccent")}`,
         heroPointsEnabled: heroPointsEnabled(),
         moduleVersion: MODULE_VERSION_LABEL
       },
@@ -4889,7 +4928,11 @@ Hooks.once("init", () => {
       dark: "Чёрный"
     },
     default: "light",
-    onChange: () => renderOpenPartySheets()
+    onChange: value => {
+      void persistPersonalThemeValue("partyThemeBackground", value).catch(error => {
+        console.warn(`${MODULE_ID} | Не удалось сохранить персональный фон пользователя.`, error);
+      });
+    }
   });
 
   game.settings.register(MODULE_ID, "partyThemeAccent", {
@@ -4905,7 +4948,11 @@ Hooks.once("init", () => {
       blue: "Синий"
     },
     default: "green",
-    onChange: () => renderOpenPartySheets()
+    onChange: value => {
+      void persistPersonalThemeValue("partyThemeAccent", value).catch(error => {
+        console.warn(`${MODULE_ID} | Не удалось сохранить персональный цвет пользователя.`, error);
+      });
+    }
   });
 
   Handlebars.registerHelper("signed", signed);
@@ -4924,6 +4971,7 @@ Hooks.once("ready", async () => {
     return;
   }
 
+  await initializePersonalThemeValues();
   if (game.user.isGM && game.settings.get(MODULE_ID, "autoCreateParty")) await ensurePartyActor({ notify: false });
   await refreshPublicPartySnapshot();
   ui.actors?.render(false);
