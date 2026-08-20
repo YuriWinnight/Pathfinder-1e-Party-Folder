@@ -1,4 +1,4 @@
-<form class="pf1-party-sheet-root {{party.portraitClass}}" autocomplete="off">
+<form class="pf1-party-sheet-root {{party.portraitClass}} {{party.themeClass}}" autocomplete="off">
   <header class="pf1-party-hero">
     <div class="pf1-party-token-wrap">
       <div class="pf1-party-token-drag" draggable="true" title="Перетащить токен партии на сцену">
@@ -119,9 +119,9 @@
                   <div class="pf1-ac"><span>Врасплох</span><strong>{{combat.ac.flatFooted}}</strong></div>
                 </section>
                 <section class="pf1-saving-throws">
-                  <div class="pf1-save"><span>Стойкость</span><strong>{{signed saves.fort}}</strong></div>
-                  <div class="pf1-save"><span>Реакция</span><strong>{{signed saves.ref}}</strong></div>
-                  <div class="pf1-save"><span>Воля</span><strong>{{signed saves.will}}</strong></div>
+                  <button type="button" class="pf1-save is-rollable" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="fort" data-bonus="{{saves.fort}}" title="Бросить испытание Стойкости"><span>Стойкость</span><strong>{{signed saves.fort}}</strong></button>
+                  <button type="button" class="pf1-save is-rollable" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="ref" data-bonus="{{saves.ref}}" title="Бросить испытание Реакции"><span>Реакция</span><strong>{{signed saves.ref}}</strong></button>
+                  <button type="button" class="pf1-save is-rollable" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="will" data-bonus="{{saves.will}}" title="Бросить испытание Воли"><span>Воля</span><strong>{{signed saves.will}}</strong></button>
                 </section>
                 <div class="pf1-senses"><span>Чувства</span><strong>{{senses}}</strong></div>
               </div>

@@ -9243,3 +9243,223 @@ a.pf1-folder-open-party-button.is-circle .pf1-folder-open-party-icon img {
   min-height: 1.625rem !important;
   padding: .15rem .35rem !important;
 }
+
+/* 1.6.9 configurable party-menu backgrounds and accent palettes. */
+.window-app.pf1-party-folder .pf1-party-sheet-root {
+  --pf1-party-theme-header: #2f9d50;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-accent-brown {
+  --pf1-party-theme-header: #8b5a3c;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-accent-burgundy {
+  --pf1-party-theme-header: #a3294e;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-accent-blue {
+  --pf1-party-theme-header: #347fba;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root[class*="pf1-theme-accent-"] .pf1-party-hero {
+  background:
+    url("../assets/pf2e-sheet/header-bw.webp") repeat-x top/cover,
+    url("../assets/pf2e-sheet/background.webp") no-repeat top/cover,
+    var(--pf1-party-theme-header) !important;
+  background-blend-mode: multiply !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-beige {
+  --bg: #dedbd1;
+  --bg-dark: #cfcbc0;
+  --pf2e-bg: #dedbd1;
+  --pf2e-bg-dark: #cfcbc0;
+  background: url("../assets/pf1-sheet/parchment.jpg") repeat local top left !important;
+  background-size: 512px 512px !important;
+  background-blend-mode: normal !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark {
+  --bg: #111210;
+  --bg-dark: #090a09;
+  --pf2e-bg: #111210;
+  --pf2e-bg-dark: #090a09;
+  --text-dark: #d8d6ce;
+  --pf2e-text: #d8d6ce;
+  --alt: #aaa69d;
+  --alt-dark: #d0ccc2;
+  --pf2e-alt: #aaa69d;
+  --pf2e-alt-dark: #d0ccc2;
+  --sub: #302f2c;
+  --pf2e-sub: #302f2c;
+  --color-border: rgba(208, 204, 194, .26);
+  --pf2e-border: rgba(208, 204, 194, .26);
+  --color-proficiency-untrained: #a19e96;
+  --color-pf-primary: #b8878e;
+  --color-pf-primary-dark: #966c72;
+  --color-pf-secondary: #6f84a8;
+  --color-proficiency-trained: #7f92b2;
+  --color-proficiency-expert: #98a7c0;
+  --pf2e-primary: #b8878e;
+  --pf2e-primary-dark: #966c72;
+  --pf2e-secondary: #6f84a8;
+  --primary: #b8878e;
+  --secondary: #6f84a8;
+  --skill-blue: #8799bd;
+  --skill-gray: #99978f;
+  --skill-red: #bd7d7d;
+  --skill-purple: #9d8ab5;
+  --skill-gold: #b0a071;
+  --skill-burgundy: #ad7589;
+  background:
+    linear-gradient(rgba(8, 9, 8, .88), rgba(8, 9, 8, .88)),
+    url("../assets/pf2e-sheet/background.webp") no-repeat local top/cover !important;
+  background-blend-mode: multiply !important;
+  color: var(--text-dark) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-primary-tabs,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-panel,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-overview-box,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-side-table,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-small-member-card,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-activity-row,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item-list {
+  background-color: rgba(214, 210, 200, .045) !important;
+  color: var(--text-dark) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-member-combat-tags .pf1-combat-check {
+  background-color: rgba(214, 210, 200, .035) !important;
+  color: var(--text-dark) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item:nth-child(even),
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item:nth-child(even) {
+  background-color: rgba(214, 210, 200, .065) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-search-line,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark input:not(.pf1-party-name-input),
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark select,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark textarea {
+  border-color: rgba(208, 204, 194, .28) !important;
+  background-color: rgba(214, 210, 200, .055) !important;
+  color: var(--text-dark) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item-price,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item-quantity,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item-weight,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-field,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item-quantity button,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-small-member-info span,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-activity-text span {
+  color: var(--text-dark) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-member-main {
+  border-left-color: rgba(255, 255, 255, .24) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-member-row:not(:last-child)::after,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-side-table div,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item {
+  border-color: rgba(208, 204, 194, .14) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-category summary,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-total-line,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-footer {
+  background: #373632 !important;
+  border-color: #5d5a54 !important;
+  color: #d8d6ce !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-primary-tabs {
+  background: #1a1b19 !important;
+  border-bottom: 1px solid rgba(208, 204, 194, .18) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-side-table,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-small-member-card,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-overview-box,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-activity-row {
+  background-color: rgba(214, 210, 200, .04) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .45) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item:hover,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-container-item:hover {
+  background-color: rgba(111, 132, 168, .12) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-ac strong {
+  color: #839f91 !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-save span,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-save strong,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-senses span,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-senses strong,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-item-name,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-price,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-weight,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-stash-quantity {
+  color: var(--text-dark) !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-exploration-layout .pf1-small-member-info > span:not(.pf1-small-member-hp) {
+  border-left-color: rgba(208, 204, 194, .14) !important;
+  background: rgba(214, 210, 200, .045) !important;
+}
+
+/* 1.7.2 dark navigation decorations and rollable saving throws. */
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-primary-tabs::before,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-party-primary-tabs::after {
+  filter: brightness(0) invert(1) !important;
+  opacity: .34 !important;
+}
+
+.window-app.pf1-party-folder .pf1-saving-throws button.pf1-save {
+  display: flex !important;
+  flex: 1 1 0 !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--text-dark) !important;
+  font-family: var(--sans-serif) !important;
+  line-height: normal !important;
+  text-align: center !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  transition: background-color .12s ease, opacity .12s ease !important;
+}
+
+.window-app.pf1-party-folder .pf1-saving-throws button.pf1-save > span,
+.window-app.pf1-party-folder .pf1-saving-throws button.pf1-save > strong {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 !important;
+  text-align: center !important;
+}
+
+.window-app.pf1-party-folder .pf1-saving-throws button.pf1-save:hover,
+.window-app.pf1-party-folder .pf1-saving-throws button.pf1-save:focus-visible {
+  background: rgba(23, 31, 105, .08) !important;
+  opacity: .82 !important;
+  outline: none !important;
+}
+
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-saving-throws button.pf1-save:hover,
+.window-app.pf1-party-folder .pf1-party-sheet-root.pf1-theme-bg-dark .pf1-saving-throws button.pf1-save:focus-visible {
+  background: rgba(111, 132, 168, .14) !important;
+}

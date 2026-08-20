@@ -9,11 +9,13 @@ const ACTIVITIES_FLAG = "activities";
 const PUBLIC_SNAPSHOT_FLAG = "publicSnapshot";
 const HERO_POINTS_FLAG = "heroPoints";
 const MEMBER_INFORMATION_MASKS_SETTING = "memberInformationMasks";
+const RU_IMPROVEMENTS_ID = "pf1e-ru-improvements";
+const RU_IMPROVEMENTS_SCROLL_PICKER_SETTING = "enableScrollIconPicker";
 const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v1.6.6";
+const MODULE_VERSION_LABEL = "v1.7.4";
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
 const HERO_POINT_SAVE_DELAY_MS = 180;
 const HERO_POINT_PRE_ROLL_BONUS = 8;
@@ -379,7 +381,8 @@ function formatSkillLabel(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   const locale = game.i18n?.lang || "ru";
-  const lower = raw.toLocaleLowerCase(locale);
+  const corrected = raw.replace(/полет/giu, "полёт");
+  const lower = corrected.toLocaleLowerCase(locale);
   return lower.charAt(0).toLocaleUpperCase(locale) + lower.slice(1);
 }
 
@@ -972,7 +975,7 @@ function getSenses(actor) {
     "system.attributes.senses.darkvision.range",
     "data.data.traits.senses.dv"
   ], 0);
-  if (darkvision) senses.add(`Тёмное зрение ${darkvision} фт`);
+  if (darkvision) senses.add(`Ночное зрение ${darkvision} фт`);
 
   const lowLight = [
     gprop(actor, "system.traits.senses.ll"),
@@ -991,7 +994,7 @@ function localizeSense(value) {
   const lower = key.toLowerCase();
   if (IGNORED_SENSE_MARKERS.has(lower)) return "";
   if (["ll", "low-light", "low light", "low-light vision", "сумеречное зрение"].includes(lower)) return "Сумеречное зрение";
-  if (["dv", "darkvision", "dark vision", "тёмное зрение", "темное зрение"].includes(lower)) return "Тёмное зрение";
+  if (["dv", "darkvision", "dark vision", "тёмное зрение", "темное зрение", "ночное зрение"].includes(lower)) return "Ночное зрение";
   return key;
 }
 
@@ -2560,6 +2563,27 @@ async function rollCombatCheck(actor, check, displayedBonus = 0) {
   });
 }
 
+async function rollSavingThrow(actor, saveId, displayedBonus = 0) {
+  if (!actor || !["fort", "ref", "will"].includes(saveId)) return null;
+  const ownsActor = actor.isOwner
+    || actor.testUserPermission?.(game.user, "OWNER")
+    || actor.testUserPermission?.(game.user, 3)
+    || false;
+
+  if (ownsActor && typeof actor.rollSavingThrow === "function") {
+    return actor.rollSavingThrow(saveId, { event: null });
+  }
+
+  const labels = { fort: "Стойкость", ref: "Реакция", will: "Воля" };
+  const bonus = toNumber(displayedBonus, 0);
+  const formula = bonus >= 0 ? `1d20 + ${bonus}` : `1d20 - ${Math.abs(bonus)}`;
+  const roll = await new Roll(formula).roll({ async: true });
+  return roll.toMessage({
+    speaker: ChatMessage.getSpeaker({ actor }),
+    flavor: `${actor.name}: испытание ${labels[saveId]}`
+  });
+}
+
 function getSkillOptions(actor) {
   const skills = collectSkills(actor);
   const byId = new Map();
@@ -2696,6 +2720,242 @@ function spellConsumableName(spellName, kind) {
   return localizeOrFallback(key, fallback, { name: spellName });
 }
 
+function activeRuImprovementsModule() {
+  const module = game.modules?.get?.(RU_IMPROVEMENTS_ID);
+  return module?.active ? module : null;
+}
+
+function ruImprovementsScrollPickerEnabled() {
+  if (!activeRuImprovementsModule()) return false;
+  try {
+    return game.settings.get(RU_IMPROVEMENTS_ID, RU_IMPROVEMENTS_SCROLL_PICKER_SETTING);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function ruImprovementsSupportsConsumableType(type) {
+  return type === "potion" || type === "wand" || (type === "scroll" && ruImprovementsScrollPickerEnabled());
+}
+
+function knownRuImprovementsConsumableIcons(type) {
+  const numbered = (prefix, numbers, extension = "png") => numbers.map(number => `${prefix}-${number}.${extension}`);
+  const files = {
+    potion: [
+      "pf1-unique-4.jpg",
+      ...numbered("pyvo-alchemical-elixir", [1, 4, 5, 7, 8, 13, 16, 18, 19, 21, 24, 31, 34, 37, 40, 44, 47, 48, 50]),
+      ...numbered("pyvo-alchemical-potion", [4, 5, 6, 9, 10, 13, 15, 22, 25, 28, 33, 37, 39, 44, 47]),
+      "pyvo-barkskin.webp", "pyvo-black-dragon-breath.webp", "pyvo-disguise.webp",
+      "pyvo-effervescent.webp", "pyvo-fire-resistance.webp", "pyvo-flying-potion.webp",
+      "pyvo-gecko.webp", "pyvo-healing-potion.webp", "pyvo-invisibility-potion.webp",
+      "pyvo-panacea.webp", "pyvo-phoenix-flask.webp", "pyvo-quickness.webp",
+      "pyvo-resistance.webp", "pyvo-shrinking.webp", "pyvo-truesight-potion.webp",
+      "pyvo-truth.webp", "pyvo-water-breathing.webp", "pyvo-wine-of-blood.webp"
+    ],
+    wand: [
+      "foundry-wand-carved-fire.webp", "foundry-wand-carved-pink.webp",
+      "foundry-wand-carved-stone-shard.webp", "foundry-wand-gem-blue.webp",
+      "foundry-wand-gem-green.webp", "foundry-wand-gem-pink.webp", "foundry-wand-gem-purple.webp",
+      "foundry-wand-gem-red.webp", "foundry-wand-gem-teal.webp", "foundry-wand-gem-violet.webp",
+      "foundry-wand-simple-eye.webp", "foundry-wand-skull-cross.webp",
+      "foundry-wand-skull-feathers.webp", "foundry-wand-skull-forked.webp",
+      "foundry-wand-skull-horned.webp", "foundry-wand-star-gold.webp", "foundry-wand-totem.webp",
+      "laaru-sun-staff.webp", "pf1-wand-star.jpg",
+      ...numbered("pyvo-artifact", [24, 30, 33, 34, 35, 36, 38, 40]),
+      ...numbered("pyvo-magic-staff", Array.from({ length: 50 }, (_value, index) => index + 1)),
+      "pyvo-crackling-lightning.webp", "pyvo-magic-wand.webp", "pyvo-overflowing-life.webp",
+      "pyvo-smoldering-fireballs.webp", "pyvo-snowfields.webp", "pyvo-spider.webp",
+      "pyvo-staff-of-final-rest.webp", "pyvo-staff-of-fire.webp", "pyvo-staff-of-healing.webp",
+      "pyvo-staff-of-illumination.webp", "pyvo-staff-of-necromancy.webp", "pyvo-staff-of-power.webp",
+      "pyvo-staff-of-providence.webp", "pyvo-verdant-staff.webp", "pyvo-widening.webp"
+    ],
+    scroll: [
+      "scroll-bound-blue-white.webp", "scroll-bound-brown-tan.webp", "scroll-bound-emerald-seal.png",
+      "scroll-bound-sealed-red.webp", "scroll-bound-skull-blue.webp", "scroll-bound-violet-thorns.png",
+      "scroll-pentagram-burning.png", "scroll-pentagram-golden.png", "scroll-pentagram-tidal.png",
+      "scroll-pentagram-verdant.png", "scroll-pentagram-violet.png", "scroll-runed-brown-purple.webp",
+      "scroll-runed-brown.webp", "scroll-symbol-circle-white.webp"
+    ]
+  }[type] ?? [];
+  const folder = { potion: "potions", wand: "wands", scroll: "scrolls" }[type];
+  return folder ? files.map(file => `modules/${RU_IMPROVEMENTS_ID}/assets/consumables/${folder}/${file}`) : [];
+}
+
+function consumableIconLabel(path) {
+  const filename = String(path ?? "").split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+  const cleaned = filename
+    .replace(/^(?:pyvo|foundry|pf1|laaru)-/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+  if (!cleaned) return "Изображение предмета";
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+async function browseRuImprovementsConsumableIcons(type) {
+  const folder = { potion: "potions", wand: "wands", scroll: "scrolls" }[type];
+  const knownFiles = knownRuImprovementsConsumableIcons(type);
+  const picker = globalThis.FilePicker;
+  if (!folder || typeof picker?.browse !== "function") return knownFiles;
+  const path = `modules/${RU_IMPROVEMENTS_ID}/assets/consumables/${folder}`;
+  try {
+    const result = await picker.browse("data", path);
+    const files = (result?.files ?? [])
+      .filter(file => /\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(file))
+      .sort((left, right) => consumableIconLabel(left).localeCompare(consumableIconLabel(right), game.i18n.lang));
+    return files.length ? files : knownFiles;
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Не удалось прочитать изображения Ru Improvements.`, error);
+    return knownFiles;
+  }
+}
+
+function applyConsumableIconToSource(source, selected) {
+  const updated = deepClone(source);
+  updated.img = selected;
+  const actions = gprop(updated, "system.actions") ?? gprop(updated, "data.data.actions");
+  if (Array.isArray(actions) && actions[0]) sprop(updated, "system.actions.0.img", selected);
+  return updated;
+}
+
+async function chooseRuImprovementsIconWithApi(source, type, module) {
+  const api = module?.api;
+  const sourcePicker = api?.chooseConsumableIconForSource;
+  if (typeof sourcePicker === "function") {
+    const result = await sourcePicker(deepClone(source), type);
+    if (typeof result === "string") return applyConsumableIconToSource(source, result);
+    return result && typeof result === "object" ? result : source;
+  }
+
+  const itemPicker = api?.chooseConsumableIcon;
+  if (typeof itemPicker !== "function") return null;
+  const draft = deepClone(source);
+  const adapter = {
+    ...draft,
+    system: draft.system ?? {},
+    async update(changes) {
+      for (const [path, value] of Object.entries(changes ?? {})) sprop(draft, path, value);
+      return adapter;
+    }
+  };
+  const result = await itemPicker(adapter, type);
+  if (typeof result === "string") return applyConsumableIconToSource(draft, result);
+  return result && typeof result === "object" ? result : draft;
+}
+
+async function chooseRuImprovementsConsumableIcon(source, type) {
+  const module = activeRuImprovementsModule();
+  if (!module || !ruImprovementsSupportsConsumableType(type)) return source;
+
+  try {
+    const apiResult = await chooseRuImprovementsIconWithApi(source, type, module);
+    if (apiResult) return apiResult;
+  } catch (error) {
+    console.warn(`${MODULE_ID} | API выбора изображений Ru Improvements недоступен, используется совместимый выбор.`, error);
+  }
+
+  const files = await browseRuImprovementsConsumableIcons(type);
+  if (!files.length) return source;
+  const choices = files.map((img, index) => {
+    const label = consumableIconLabel(img);
+    return `
+      <label class="pf1e-ru-icon-choice" title="${escapeHTML(label)}">
+        <input type="radio" name="pf1e-ru-consumable-icon" value="${escapeHTML(img)}" ${index === 0 ? "checked" : ""}>
+        <img src="${escapeHTML(img)}" alt="${escapeHTML(label)}">
+        <span>${escapeHTML(label)}</span>
+      </label>`;
+  }).join("");
+  const noun = { potion: "зелья", wand: "жезла", scroll: "свитка" }[type] ?? "предмета";
+  const selected = await Dialog.wait({
+    title: `Выберите иконку для ${noun}`,
+    content: `
+      <p class="pf1e-ru-icon-picker-hint">Выберите изображение для созданного предмета.</p>
+      <div class="pf1e-ru-icon-grid">${choices}</div>`,
+    buttons: {
+      apply: {
+        icon: '<i class="fas fa-check"></i>',
+        label: "Выбрать",
+        callback: html => {
+          const root = html?.[0] ?? html;
+          return root?.querySelector?.('input[name="pf1e-ru-consumable-icon"]:checked')?.value ?? null;
+        }
+      },
+      keep: {
+        icon: '<i class="fas fa-undo"></i>',
+        label: "Оставить текущую",
+        callback: () => null
+      }
+    },
+    default: "apply",
+    close: () => null
+  }, {
+    classes: ["dialog", "pf1", "pf1e-ru-icon-picker"],
+    width: 680
+  });
+  return selected ? applyConsumableIconToSource(source, selected) : source;
+}
+
+async function createSystemStyleSpellConsumableDialog(spellSource) {
+  const source = deepClone(spellSource);
+  const SpellClass = CONFIG.Item?.documentClasses?.spell;
+  const [sl, cl] = SpellClass?.getMinimumCasterLevelBySpellData?.(source) ?? [1, 1];
+  const content = await renderTemplate("systems/pf1/templates/internal/create-consumable.hbs", {
+    name: source.name,
+    sl,
+    cl,
+    isGM: game.user.isGM
+  });
+  const getFormData = root => {
+    const form = root?.querySelector?.("form");
+    const formObject = form && typeof FormDataExtended === "function"
+      ? new FormDataExtended(form).object
+      : Object.fromEntries(new FormData(form));
+    const data = foundry.utils.expandObject(formObject ?? {});
+    source.sl = Number.isNaN(data.sl) ? 1 : data.sl ?? 1;
+    source.cl = Number.isNaN(data.cl) ? 1 : data.cl ?? 1;
+    source.identified = data.identified;
+    source.unidentifiedName = data.unidentifiedName;
+    return source;
+  };
+  const createConsumable = async (root, type) => {
+    const consumable = await SpellClass.toConsumable(getFormData(root), type);
+    if (consumable?._id) delete consumable._id;
+    return consumable;
+  };
+
+  return Dialog.wait({
+    title: game.i18n.format("PF1.CreateItemForSpell", { name: source.name }),
+    content,
+    buttons: {
+      potion: {
+        icon: '<i class="fas fa-prescription-bottle"></i>',
+        label: game.i18n.localize("PF1.CreateItemPotion"),
+        callback: root => createConsumable(root, "potion")
+      },
+      scroll: {
+        icon: '<i class="fas fa-scroll"></i>',
+        label: game.i18n.localize("PF1.CreateItemScroll"),
+        callback: root => createConsumable(root, "scroll")
+      },
+      wand: {
+        icon: '<i class="fas fa-magic"></i>',
+        label: game.i18n.localize("PF1.CreateItemWand"),
+        callback: root => createConsumable(root, "wand")
+      },
+      spell: {
+        icon: '<i class="fas fa-hand-sparkles"></i>',
+        label: game.i18n.localize("PF1.ItemTypeSpell"),
+        callback: () => "spell"
+      }
+    },
+    close: () => false,
+    default: "potion"
+  }, {
+    classes: ["dialog", "pf1", "pf1-party-create-consumable"],
+    jQuery: false,
+    itemData: source
+  });
+}
+
 async function createSpellConsumableFallback(spellSource) {
   const SpellClass = CONFIG.Item?.documentClasses?.spell;
   const minimum = SpellClass?.getMinimumCasterLevelBySpellData?.(spellSource) ?? [
@@ -2758,11 +3018,16 @@ async function createSpellConsumableFallback(spellSource) {
 
 async function createItemFromDroppedSpell(item) {
   const source = item.toObject ? item.toObject() : deepClone(item);
+  const ruImprovementsActive = Boolean(activeRuImprovementsModule());
   const systemDialog = globalThis.pf1?.utils?.createConsumableSpellDialog;
-  if (typeof systemDialog === "function") {
-    const result = await systemDialog(source, { allowSpell: true });
+  if (ruImprovementsActive || typeof systemDialog === "function") {
+    const result = ruImprovementsActive
+      ? await createSystemStyleSpellConsumableDialog(source)
+      : await systemDialog(source, { allowSpell: true });
     if (!result) return null;
-    return result === "spell" ? source : result;
+    if (result === "spell") return source;
+    const type = gprop(result, "system.subType") ?? gprop(result, "data.data.subType");
+    return ruImprovementsActive ? chooseRuImprovementsConsumableIcon(result, type) : result;
   }
   return createSpellConsumableFallback(source);
 }
@@ -2984,6 +3249,7 @@ class PF1PartyActorSheet extends ActorSheet {
         tokenImg: gprop(this.actor, "prototypeToken.texture.src") || this.actor.img || PARTY_ICON,
         permissionLabel: "Настройки",
         portraitClass: `pf1-portraits-${game.settings.get(MODULE_ID, "memberPortraitStyle") || "pf2e"}`,
+        themeClass: `pf1-theme-bg-${game.settings.get(MODULE_ID, "partyThemeBackground") || "light"} pf1-theme-accent-${game.settings.get(MODULE_ID, "partyThemeAccent") || "green"}`,
         heroPointsEnabled: heroPointsEnabled(),
         moduleVersion: MODULE_VERSION_LABEL
       },
@@ -3550,6 +3816,9 @@ class PF1PartyActorSheet extends ActorSheet {
         break;
       case "roll-combat-check":
         if (actor) await rollCombatCheck(actor, button.dataset.check, button.dataset.bonus);
+        break;
+      case "roll-saving-throw":
+        if (actor) await rollSavingThrow(actor, button.dataset.save, button.dataset.bonus);
         break;
       case "set-activity":
         await this._setActivity(actor);
@@ -4605,6 +4874,37 @@ Hooks.once("init", () => {
       circle: "Старые круглые портреты"
     },
     default: "pf2e",
+    onChange: () => renderOpenPartySheets()
+  });
+
+  game.settings.register(MODULE_ID, "partyThemeBackground", {
+    name: "Фон меню партии",
+    hint: "Выберите светлый, бежевый или тёмный вариант фона. Настройка применяется только для текущего пользователя.",
+    scope: "client",
+    config: true,
+    type: String,
+    choices: {
+      light: "Светлый (стандартный)",
+      beige: "Бежевый",
+      dark: "Чёрный"
+    },
+    default: "light",
+    onChange: () => renderOpenPartySheets()
+  });
+
+  game.settings.register(MODULE_ID, "partyThemeAccent", {
+    name: "Основной цвет меню партии",
+    hint: "Цвет шапки и основных акцентов меню партии. Настройка применяется только для текущего пользователя.",
+    scope: "client",
+    config: true,
+    type: String,
+    choices: {
+      green: "Зелёный (стандартный)",
+      brown: "Тёмно-коричневый",
+      burgundy: "Бордовый",
+      blue: "Синий"
+    },
+    default: "green",
     onChange: () => renderOpenPartySheets()
   });
 

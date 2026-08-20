@@ -1,5 +1,45 @@
 # PF1e Party Folder
 
+## Changes in version 1.7.4
+
+- The spell conversion window in the stash now uses the native PF1 actor-sheet layout.
+- When Pathfinder 1e Ru Improvements is active, potion, wand, and enabled scroll conversions offer its consumable image picker.
+- Ru Improvements integration is optional and is never called when that module is disabled.
+
+## Changes in version 1.7.3
+
+- Restored the original equal-width, centered layout of the three saving throws while keeping them clickable.
+
+## Changes in version 1.7.2
+
+- Fortitude, Reflex, and Will saves can now be rolled directly from each member's overview row.
+- Made the primary-tab decorations visible without becoming bright in the dark theme.
+
+## Changes in version 1.7.1
+
+- The beige theme now uses the original PF1 parchment texture.
+- Reworked the dark theme around a near-black base with muted, readable text, borders, fields, and accents.
+
+## Changes in version 1.7.0
+
+- Replaced the beige background with a lighter neutral paper tone.
+- Brightened the brown, burgundy, and blue header colors.
+- Accent selection now changes only the party header.
+- Improved panel, field, border, and text contrast for the dark background.
+
+## Changes in version 1.6.9
+
+- Added independent client settings for light, beige, and dark party-menu backgrounds.
+- Added green, dark-brown, burgundy, and blue accent themes.
+
+## Changes in version 1.6.8
+
+- Corrected the displayed Russian skill label from "Полет" to "Полёт".
+
+## Changes in version 1.6.7
+
+- Renamed the displayed Russian label for darkvision to "Ночное зрение".
+
 ## Changes in version 1.6.6
 
 - Added a GM-only setup window for hiding or replacing each party member's senses and languages in the player-facing party menu.
