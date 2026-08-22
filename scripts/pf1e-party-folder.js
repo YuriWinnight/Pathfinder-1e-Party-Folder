@@ -9,6 +9,7 @@ const ACTIVITIES_FLAG = "activities";
 const PUBLIC_SNAPSHOT_FLAG = "publicSnapshot";
 const HERO_POINTS_FLAG = "heroPoints";
 const MEMBER_INFORMATION_MASKS_SETTING = "memberInformationMasks";
+const METAGAME_ACCESS_ROLE_SETTING = "metagameAccessRole";
 const RU_IMPROVEMENTS_ID = "pf1e-ru-improvements";
 const RU_IMPROVEMENTS_SCROLL_PICKER_SETTING = "enableScrollIconPicker";
 const PERSONAL_THEME_OPTIONS = Object.freeze({
@@ -19,7 +20,13 @@ const SHEET_ID = `${MODULE_ID}.PF1PartyActorSheet`;
 const PARTY_ICON = `modules/${MODULE_ID}/assets/party-hood.svg`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v1.7.6";
+const MODULE_VERSION_LABEL = "v1.7.7";
+
+function canManageMetagameSettings(user = game.user) {
+  const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
+  const requiredRole = Number(game.settings.get(MODULE_ID, METAGAME_ACCESS_ROLE_SETTING) ?? assistantRole);
+  return Number(user?.role ?? 0) >= requiredRole;
+}
 const STASH_QUANTITY_SAVE_DELAY_MS = 120;
 const HERO_POINT_SAVE_DELAY_MS = 180;
 const HERO_POINT_PRE_ROLL_BONUS = 8;
@@ -3287,6 +3294,7 @@ class PF1PartyActorSheet extends ActorSheet {
         img: this.actor.img || PARTY_ICON,
         tokenImg: gprop(this.actor, "prototypeToken.texture.src") || this.actor.img || PARTY_ICON,
         permissionLabel: "Настройки",
+        canConfigureMetagame: canManageMetagameSettings(),
         portraitClass: `pf1-portraits-${game.settings.get(MODULE_ID, "memberPortraitStyle") || "pf2e"}`,
         themeClass: `pf1-theme-bg-${getPersonalThemeValue("partyThemeBackground")} pf1-theme-accent-${getPersonalThemeValue("partyThemeAccent")}`,
         heroPointsEnabled: heroPointsEnabled(),
@@ -3869,7 +3877,7 @@ class PF1PartyActorSheet extends ActorSheet {
         await this._openCheckRequestDialog();
         break;
       case "clear-activities":
-        await this.actor.setFlag(MODULE_ID, ACTIVITIES_FLAG, {});
+        await this.actor.unsetFlag(MODULE_ID, ACTIVITIES_FLAG);
         break;
       case "long-rest":
         await this._longRest();
@@ -3961,6 +3969,10 @@ class PF1PartyActorSheet extends ActorSheet {
   }
 
   async _metagameSettings() {
+    if (!canManageMetagameSettings()) {
+      ui.notifications.warn("Недостаточно прав для изменения настроек меню партии.");
+      return;
+    }
     const current = this.actor.getFlag(MODULE_ID, METAGAME_FLAG) ?? defaultMetagameSettings();
     const result = await metagameDialog(current);
     if (!result) return;
@@ -4781,6 +4793,22 @@ class PF1MemberInformationMasksForm extends FormApplication {
 }
 
 Hooks.once("init", () => {
+  game.settings.register(MODULE_ID, METAGAME_ACCESS_ROLE_SETTING, {
+    name: "Доступ к настройкам меню партии",
+    hint: "Минимальная роль пользователя, которой разрешено открывать и изменять метаигровые настройки меню партии.",
+    scope: "world",
+    config: true,
+    type: Number,
+    choices: {
+      4: "Только игровой мастер",
+      3: "Помощник игрового мастера и мастер",
+      2: "Доверенный игрок и выше",
+      1: "Все игроки"
+    },
+    default: CONST.USER_ROLES?.ASSISTANT ?? 3,
+    onChange: () => renderOpenPartySheets()
+  });
+
   game.settings.registerMenu(MODULE_ID, "memberInformationMasksMenu", {
     name: "Подмена чувств и языков персонажей",
     label: "Настроить подмену",

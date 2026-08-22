@@ -11,7 +11,9 @@
     </div>
     <div class="pf1-party-right-title">
       <div>ПАРТИЯ</div>
+      {{#if party.canConfigureMetagame}}
       <span class="pf1-metagame-open" data-action="metagame-settings" title="Метаигровая информация"><i class="fas fa-cog"></i> {{party.permissionLabel}}</span>
+      {{/if}}
       <small class="pf1-party-version">{{party.moduleVersion}}</small>
     </div>
   </header>

@@ -1,5 +1,11 @@
 # PF1e Party Folder
 
+## Changes in version 1.7.7
+
+- Party Folder no longer changes the layout of Foundry's global tooltips.
+- Clearing exploration activities now removes every assigned check.
+- Access to party metagame settings is controlled by a minimum user role and defaults to Assistant GM.
+
 ## Changes in version 1.7.6
 
 - Party background and accent selections are stored on the current Foundry user.
