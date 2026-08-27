@@ -1,5 +1,17 @@
 # PF1e Party Folder
 
+## Changes in version 1.9.8
+
+- Replaced decorative corner marks with the same subtle inset and outer edge used by stash category bars.
+- Immediately refreshes the public party snapshot and every open party sheet when a member actor is deleted.
+
+## Changes in version 1.9.7
+
+- Added NPC actors as supported party-folder members and statistics entries.
+- Displayed PF1 unidentified item names throughout the stash, including nested container contents.
+- Matched actor wealth to PF1's native item valuation, including containers, charges, quantities, broken items, and unidentified prices.
+- Added inner corner accents to statistics, identification, and total-weight bars, and applied circular portraits to statistics in circular portrait mode.
+
 ## Changes in version 1.9.6
 
 - Added party-menu settings for hiding identification DCs, limiting identification to the user's assigned character, and limiting party-statistic rolls to owned actors.

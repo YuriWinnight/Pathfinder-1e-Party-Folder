@@ -55,7 +55,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v1.9.6";
+const MODULE_VERSION_LABEL = "v1.9.8";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -671,7 +671,7 @@ async function setStash(actor, stash) {
 }
 
 function isMemberCandidate(actor) {
-  return actor && actor.type === "character" && !actor.getFlag(MODULE_ID, PARTY_FLAG);
+  return actor && ["character", "npc"].includes(actor.type) && !actor.getFlag(MODULE_ID, PARTY_FLAG);
 }
 
 function getPartyMembers(partyActor, { ignorePermissions = false } = {}) {
@@ -686,7 +686,7 @@ function getPartyMembers(partyActor, { ignorePermissions = false } = {}) {
 
 async function addMember(partyActor, actorId) {
   const actor = game.actors.get(actorId);
-  if (!isMemberCandidate(actor)) return ui.notifications.warn("В партию можно добавить только персонажа.");
+  if (!isMemberCandidate(actor)) return ui.notifications.warn("В партию можно добавить только персонажа или NPC.");
   const ids = new Set(partyActor.getFlag(MODULE_ID, MEMBERS_FLAG) ?? []);
   ids.add(actor.id);
   await partyActor.setFlag(MODULE_ID, MEMBERS_FLAG, [...ids]);
@@ -1704,7 +1704,8 @@ function readActorCurrency(actor, category = "currency") {
   for (const [coin, meta] of Object.entries(CURRENCY_META)) {
     for (const alias of meta.aliases) {
       if (currency[alias] !== undefined) {
-        result[coin] = toNumber(currency[alias], 0);
+        const rawAmount = currency[alias];
+        result[coin] = toNumber(rawAmount?.value ?? rawAmount?.amount ?? rawAmount, 0);
         break;
       }
     }
@@ -1816,8 +1817,15 @@ function parsePriceToGp(raw) {
   if (typeof raw === "number") return raw;
   if (typeof raw === "object") {
     if (raw.gp !== undefined) return toNumber(raw.gp, 0);
-    if (raw.value !== undefined) return parsePriceToGp(raw.value);
-    if (raw.amount !== undefined) return parsePriceToGp(raw.amount);
+    const amount = raw.value ?? raw.amount;
+    if (amount !== undefined) {
+      const denomination = String(raw.denomination ?? raw.currency ?? raw.unit ?? raw.units ?? "gp").toLowerCase();
+      const numericAmount = toNumber(amount, 0);
+      if (["pp", "пм", "плат"].includes(denomination)) return numericAmount * 10;
+      if (["sp", "см", "сер"].includes(denomination)) return numericAmount / 10;
+      if (["cp", "мм", "мед"].includes(denomination)) return numericAmount / 100;
+      return numericAmount;
+    }
   }
   const text = String(raw).trim().toLowerCase().replace(/,/g, "");
   const match = text.match(/([-+]?\d+(?:\.\d+)?)\s*(pp|gp|sp|cp|пм|зм|см|мм|плат|зол|сер|мед)?/i);
@@ -1837,6 +1845,22 @@ function getActorInventoryItems(actor) {
 }
 
 function getActorItemValueGp(actor) {
+  const actorItems = [...(actor?.items ?? [])];
+  if (actorItems.some(item => typeof item?.getValue === "function")) {
+    let valueCp = 0;
+    for (const item of actorItems) {
+      if (typeof item?.getValue !== "function" || gprop(item, "system.price") == null) continue;
+      try {
+        valueCp += toNumber(item.getValue({ sellValue: 1, inLowestDenomination: true }), 0);
+      } catch (error) {
+        console.warn(`${MODULE_ID} | Failed to read the PF1 value of ${item.name ?? item.id}`, error);
+        const source = getItemSourceData(item);
+        valueCp += getItemPriceGpEach(source) * getItemQuantity(source) * 100;
+      }
+    }
+    return valueCp / 100;
+  }
+
   const preparedValue = [
     "system.inventory.totalValue",
     "system.inventory.itemValue",
@@ -1912,6 +1936,22 @@ function normalizeItemForStash(item) {
 
 function isItemIdentified(source) {
   return gprop(source, "system.identified") !== false;
+}
+
+function getUnidentifiedItemName(source) {
+  return firstNonEmptyString(
+    gprop(source, "system.unidentified.name"),
+    gprop(source, "system.unidentifiedName"),
+    gprop(source, "system.nameUnidentified"),
+    gprop(source, "data.data.unidentified.name"),
+    gprop(source, "data.data.unidentifiedName"),
+    gprop(source, "unidentifiedName")
+  );
+}
+
+function getItemDisplayName(source, fallback = "Предмет") {
+  if (!isItemIdentified(source)) return getUnidentifiedItemName(source) || "Неопознанный предмет";
+  return firstNonEmptyString(source?.name, fallback) || fallback;
 }
 
 function getRuImprovementsCurseData(source) {
@@ -2072,15 +2112,12 @@ function getItemAuraView(source) {
 function buildIdentificationEntry(source, stashId, containerItemId = null, containerName = "") {
   const item = ensureItemSourceBasics(deepClone(source), source);
   const identified = isItemIdentified(item);
-  const unidentifiedName = String(gprop(item, "system.unidentified.name") ?? "").trim();
   return {
     stashId,
     containerItemId,
     containerName,
     realName: item.name || "Предмет",
-    name: !identified && !game.user.isGM && activeRuImprovementsModule()
-      ? unidentifiedName || "Неопознанный предмет"
-      : item.name || "Предмет",
+    name: getItemDisplayName(item),
     img: getRuImprovementsIdentificationImage(item),
     ...getItemIdentificationView(item),
     ...getItemAuraView(item)
@@ -2200,20 +2237,20 @@ function getStashItemView(stashItem) {
     const weightEach = getItemWeightEach(source);
     return {
       itemId: source._id || source.id,
-      name: source.name,
+      name: getItemDisplayName(source),
       img: getRuImprovementsIdentificationImage(source),
       quantity,
       priceGp: fmtNumber(quantity > 0 ? priceEach * quantity : priceEach),
       priceEach: fmtNumber(priceEach),
       weight: fmtNumber(quantity > 0 ? weightEach * quantity : weightEach),
       weightEach: fmtNumber(weightEach),
-      search: `${source.name || ""} ${source.type || ""}`.toLowerCase(),
+      search: `${getItemDisplayName(source, "")} ${source.type || ""}`.toLowerCase(),
       ...getItemIdentificationView(source)
     };
   }) : [];
   return {
     ...stashItem,
-    name: stashItem.name || data.name || "Предмет",
+    name: getItemDisplayName(data, stashItem.name || "Предмет"),
     type: stashItem.type || data.type || "loot",
     img: getRuImprovementsIdentificationImage(data),
     quantity,
@@ -2226,7 +2263,7 @@ function getStashItemView(stashItem) {
     containerItems,
     containerItemCount: containerItems.length,
     description: getItemDescriptionHTML(data).trim(),
-    search: `${stashItem.name || data.name || ""} ${stashItem.type || data.type || ""} ${containerItems.map(item => item.name).join(" ")}`.toLowerCase(),
+    search: `${getItemDisplayName(data, stashItem.name || "")} ${stashItem.type || data.type || ""} ${containerItems.map(item => item.name).join(" ")}`.toLowerCase(),
     ...getItemIdentificationView(data)
   };
 }
@@ -6435,10 +6472,24 @@ Hooks.on("updateActor", async (actor, changed, options = {}, userId = null) => {
   }
   renderOpenPartySheets();
 });
-Hooks.on("deleteActor", actor => {
-  const affected = actor?.getFlag?.(MODULE_ID, PARTY_FLAG)
-    || getPartyActors().some(party => (party.getFlag(MODULE_ID, MEMBERS_FLAG) ?? []).includes(actor?.id));
-  if (affected) renderOpenPartySheets();
+const deletingActorPartyIds = new Map();
+Hooks.on("preDeleteActor", actor => {
+  const party = getPartyForMember(actor);
+  if (party) deletingActorPartyIds.set(actor.id, party.id);
+});
+Hooks.on("deleteActor", async actor => {
+  const deletedPartyActor = actor?.getFlag?.(MODULE_ID, PARTY_FLAG) === true;
+  const partyId = deletingActorPartyIds.get(actor?.id);
+  deletingActorPartyIds.delete(actor?.id);
+  const party = partyId ? game.actors?.get(partyId) : getPartyForMember(actor);
+  if (!deletedPartyActor && !party) return;
+
+  if (game.user.isGM && party?.isOwner) {
+    const memberIds = new Set(party.getFlag(MODULE_ID, MEMBERS_FLAG) ?? []);
+    if (memberIds.delete(actor.id)) await party.setFlag(MODULE_ID, MEMBERS_FLAG, [...memberIds]);
+    await refreshPublicPartySnapshot(party);
+  }
+  renderOpenPartySheets({ refreshSnapshot: false });
 });
 Hooks.on("updateCombat", (combat, changed) => {
   if (changed.turn === undefined && changed.round === undefined && changed.started === undefined) return;
