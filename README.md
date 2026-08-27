@@ -1,5 +1,90 @@
 # PF1e Party Folder
 
+## Changes in version 1.9.6
+
+- Added party-menu settings for hiding identification DCs, limiting identification to the user's assigned character, and limiting party-statistic rolls to owned actors.
+- Added a module-settings manager for creating independent additional party menus with separate folders, members, stashes, hero points, and metagame settings.
+- Extended public snapshots, folder controls, actor hooks, and hero-point integration to support multiple party menus without changing the existing primary party.
+
+## Changes in version 1.9.5
+
+- Removed deprecated Foundry `Document.data` reads when opening stash items and containers.
+- Kept other members' statistics private while exposing their visible or substituted party languages.
+- Allowed every player to open and use party-stash item identification, with GM-authoritative automatic updates.
+- Added optional Ru Improvements curse-identification rules and unidentified-icon synchronization.
+
+## Changes in version 1.9.4
+
+- Made container expansion arrows black in the dark theme.
+- Isolated and centered current/maximum HP inputs from generic dark-theme input sizing.
+
+## Changes in version 1.9.3
+
+- Replaced teal ability, speed, maneuverability, and size labels with the shared interface blue palette.
+
+## Changes in version 1.9.2
+
+- Darkened the graphite fill used for negative HP while keeping it distinct from pure black.
+
+## Changes in version 1.9.1
+
+- Added graphite heart filling for negative HP, proportional to the negative value.
+- Tightened current and maximum HP values around the separator.
+- Unified the numeric size of current, maximum, temporary, and nonlethal HP values.
+
+## Changes in version 1.9.0
+
+- Smoothed the custom heart and drop shapes and introduced a more distinctive curved shield.
+- Tightened current and maximum HP values around their separator.
+- Reduced saving throw totals to sit just below AC values in visual weight.
+
+## Changes in version 1.8.9
+
+- Rebuilt HP indicators as custom outlined angular shapes with evenly spaced labels above them.
+- Reduced saving throw total size to a stronger but balanced value.
+- Added responsive layouts that prevent initiative and native trait editors from overlapping adjacent controls.
+
+## Changes in version 1.8.8
+
+- Identification now posts a separate standard Foundry roll for every item, including sound and expandable roll terms.
+- Reworked HP controls into borderless heart, shield, and drop-shaped indicators.
+- Increased saving throw totals and corrected native-editor gear alignment and dark-theme contrast.
+
+## Changes in version 1.8.7
+
+- Each item identification now makes its own Spellcraft roll and displays that roll with the matching result.
+- Reworked the statistics HP display into compact, fillable health vessels.
+- Improved saving throw emphasis, narrow combat layouts, and dark-theme contrast.
+- Applied the selected personal background theme to the item-identification window.
+
+## Changes in version 1.8.6
+
+- Language chips now show only the Foundry tooltip, with speakers listed vertically.
+- Fixed token-gallery filtering and compatibility warnings from Token Variant Art and Monster Knowledge.
+- Restored the original bold combat-bonus typography and applied it consistently to every combat check.
+
+## Changes in version 1.8.5
+
+- Party token cards now have descriptive Russian names, bilingual search, stable square previews, and a larger hover preview.
+- Saving throws, combat bonuses, initiative, size, travel speed, and language tooltips have been aligned and made easier to read.
+- Fixed keyboard submission errors in the party-token gallery.
+
+## Changes in version 1.8.4
+
+- Rebuilt the defense statistics row with AC shields, combined saving-throw bonuses and a combined initiative control.
+- Added visible language-speaker hints that respect player privacy and GM visibility.
+- Added 399 bundled party-token choices and made `green-blank.webp` the default party image.
+- Removed deprecated chat roll access and the fast-healing reapply action.
+- Moved the public party snapshot out of actor flags and coalesced sheet renders to reduce third-party hook traffic.
+
+## Changes in version 1.8.3
+
+- Statistics stay inside their column, use compact horizontal category tabs, and adapt ability and movement fields to the sheet width.
+- Special defenses are grouped by damage, energy, and conditions, with corrected Russian labels.
+- Item identification supports all-items and selective modes.
+- Fast-healing undo and reapply actions are available from the chat-message context menu.
+- Removed unused metagame visibility options from the party settings.
+
 ## Changes in version 1.7.7
 
 - Party Folder no longer changes the layout of Foundry's global tooltips.
@@ -85,6 +170,45 @@
 - Цена, количество и вес предметов редактируются прямо в раскрытом контейнере тайника.
 - Для количества вложенных предметов добавлены кнопки уменьшения и увеличения.
 - Работа с полями вложенного предмета больше не запускает его перетаскивание.
+
+## Изменения версии 1.8.2
+
+- Статистика полностью удерживается в правой колонке, а карточки характеристик получили итоговое значение по центру.
+- Скорости собраны в компактный ряд с иконками; в защите добавлены БМА, ЗБМ, МБМ и бонусы атак.
+- Текущие ПЗ не могут превышать максимум, а особые защиты редактируются через штатные окна PF1.
+- Добавлен выбор видимости статистики для игроков; мастер всегда видит всех участников папки партии.
+- Быстрое лечение можно отменить или применить повторно по ПКМ.
+- Улучшены таблицы и сообщения массового опознания предметов.
+
+## Изменения версии 1.8.1
+
+- Правая часть статистики больше не перекрывает боковую панель путешествия.
+- Характеристики собраны в компактную горизонтальную строку и получили системные броски; добавлен бросок инициативы и иконки испытаний.
+- Временные и нелетальные ПЗ получили отдельные голубой и серый слои на полосе здоровья.
+- Быстрое лечение напоминает о себе в ход персонажа и применяется кнопкой из чата.
+- Особые защиты получили расширенные поля и переход к нативному редактору листа персонажа.
+- В опознании появился общий бросок Колдовства выбранным участником партии и настройка автоматического опознания успешных предметов.
+- Пустые числовые значения теперь сохраняются как ноль.
+
+## Изменения версии 1.8.0
+
+- Во вкладку статистики возвращена боковая панель путешествия партии.
+- Исправлено переключение всех четырёх категорий статистики, элементы сделаны крупнее и нагляднее.
+- В таблицах опознания добавлены вертикальные разделители; немагические предметы больше не выводятся.
+
+## Изменения версии 1.7.9
+
+- Статистика использует всю ширину листа и разделена на четыре наглядные вкладки.
+- Числовые поля принимают как новое значение, так и относительное изменение в формате `+5` или `-5`.
+- Все виды КБ отображаются щитками, а управление опознанием тайника стало компактнее.
+- Исправлено наложение поля веса на кнопку опознания.
+
+## Изменения версии 1.7.8
+
+- Вкладка «Исследование» заменена на «Статистику» без механики активностей; боковой расчёт передвижения партии сохранён.
+- В статистике собраны редактируемые характеристики, ПЗ, скорости, размер, инициатива, испытания, КБ, УкМ и особые защиты персонажей.
+- В тайник добавлены быстрые кнопки опознания и окно «Опознавание предметов» с отдельными таблицами опознанных и неопознанных предметов.
+- Окно опознания показывает ауру, уровень заклинателя и СЛ опознания, включая предметы внутри контейнеров.
 
 ## Изменения версии 1.6.0
 

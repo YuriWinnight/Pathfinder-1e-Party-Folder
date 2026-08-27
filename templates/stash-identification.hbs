@@ -1,0 +1,42 @@
+<section class="pf1-identification-root {{themeClass}}">
+  <div class="pf1-identification-toolbar">
+    <p class="pf1-identification-hint">Предметы можно переносить между таблицами кнопкой в последнем столбце.</p>
+    {{#if canRollIdentification}}<button type="button" data-action="roll-identification"><i class="fas fa-dice-d20"></i> Опознать предметы</button>{{/if}}
+  </div>
+
+  <section class="pf1-identification-section is-unidentified">
+    <h2>Неопознанные предметы</h2>
+    <div class="pf1-identification-table">
+      <div class="pf1-identification-row pf1-identification-head">
+        <span>Предмет</span><span>Аура</span><span>УЗ</span><span>СЛ Опознания</span><span>Опознание</span>
+      </div>
+      {{#each unidentified}}
+        <div class="pf1-identification-row">
+          <span class="pf1-identification-item"><img src="{{img}}" alt=""><span>{{#if containerName}}<small>{{containerName}}</small>{{/if}}{{name}}</span></span>
+          <span>{{aura}}</span><span>{{casterLevel}}</span><span>{{displayIdentifyDC}}</span>
+          <span class="pf1-identification-action">{{#if @root.canEdit}}<button type="button" data-action="toggle-identification" data-item-id="{{stashId}}" data-container-item-id="{{containerItemId}}" title="{{identifyTitle}}"><i class="fas {{identifyIcon}}"></i></button>{{else}}<i class="fas {{identifyIcon}}" title="{{#if identified}}Предмет опознан{{else}}Предмет не опознан{{/if}}"></i>{{/if}}</span>
+        </div>
+      {{else}}
+        <div class="pf1-identification-empty">Нет неопознанных предметов.</div>
+      {{/each}}
+    </div>
+  </section>
+
+  <section class="pf1-identification-section is-identified">
+    <h2>Опознанные предметы</h2>
+    <div class="pf1-identification-table">
+      <div class="pf1-identification-row pf1-identification-head">
+        <span>Предмет</span><span>Аура</span><span>УЗ</span><span>СЛ Опознания</span><span>Опознание</span>
+      </div>
+      {{#each identified}}
+        <div class="pf1-identification-row">
+          <span class="pf1-identification-item"><img src="{{img}}" alt=""><span>{{#if containerName}}<small>{{containerName}}</small>{{/if}}{{name}}</span></span>
+          <span>{{aura}}</span><span>{{casterLevel}}</span><span>{{displayIdentifyDC}}</span>
+          <span class="pf1-identification-action">{{#if @root.canEdit}}<button type="button" data-action="toggle-identification" data-item-id="{{stashId}}" data-container-item-id="{{containerItemId}}" title="{{identifyTitle}}"><i class="fas {{identifyIcon}}"></i></button>{{else}}<i class="fas {{identifyIcon}}" title="{{#if identified}}Предмет опознан{{else}}Предмет не опознан{{/if}}"></i>{{/if}}</span>
+        </div>
+      {{else}}
+        <div class="pf1-identification-empty">Нет опознанных предметов.</div>
+      {{/each}}
+    </div>
+  </section>
+</section>

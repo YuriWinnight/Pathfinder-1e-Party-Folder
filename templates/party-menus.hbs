@@ -1,0 +1,19 @@
+<form class="pf1-party-menus-settings" autocomplete="off">
+  <p class="notes">Каждое меню использует собственную папку актёров, тайник и настройки. Перетащите нужных персонажей в соответствующую папку.</p>
+
+  <div class="pf1-party-menus-list">
+    {{#each parties}}
+      <article class="pf1-party-menu-setting-row">
+        <img src="{{img}}" alt="">
+        <span><strong>{{name}}</strong><small>{{#if primary}}Основное меню{{else}}Дополнительное меню{{/if}} · участников: {{memberCount}}</small></span>
+        <button type="button" data-action="open-party-menu" data-actor-id="{{id}}" title="Открыть меню"><i class="fas fa-external-link-alt"></i></button>
+        {{#unless primary}}<button type="button" data-action="delete-party-menu" data-actor-id="{{id}}" title="Удалить меню"><i class="fas fa-trash"></i></button>{{/unless}}
+      </article>
+    {{/each}}
+  </div>
+
+  <div class="pf1-party-menu-create-row">
+    <input type="text" name="newPartyName" placeholder="Название новой категории персонажей" required>
+    <button type="submit"><i class="fas fa-plus"></i> Создать меню</button>
+  </div>
+</form>
