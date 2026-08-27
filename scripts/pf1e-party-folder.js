@@ -55,7 +55,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v1.9.8";
+const MODULE_VERSION_LABEL = "v2.0.6";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -74,7 +74,23 @@ const pendingHeroPointUpdates = new Map();
 const heroPointSaveTimers = new Map();
 const openStashItemSources = new Map();
 const personalThemeValues = new Map();
+const stashIdentificationRenderTimers = new Map();
 let lastFastHealingTurnKey = "";
+
+const QUICK_PARTY_ROLLS = Object.freeze({
+  skills: [
+    { id: "per", label: "Внимание", icon: "fas fa-eye" },
+    { id: "sur", label: "Выживание", icon: "fas fa-leaf" },
+    { id: "dis", label: "Маскировка", icon: "fas fa-user-secret" },
+    { id: "sen", label: "Проницательность", icon: "fas fa-search" },
+    { id: "ste", label: "Скрытность", icon: "fas fa-user-ninja" }
+  ],
+  saves: [
+    { id: "fort", label: "Стойкость", icon: "fas fa-shield-alt" },
+    { id: "ref", label: "Реакция", icon: "fas fa-running" },
+    { id: "will", label: "Воля", icon: "fas fa-brain" }
+  ]
+});
 
 const PARTY_SCROLL_SELECTORS = [
   ".window-content",
@@ -668,6 +684,15 @@ function getStash(actor) {
 
 async function setStash(actor, stash) {
   await actor.setFlag(MODULE_ID, STASH_FLAG, stash);
+  renderOpenPartySheets({ refreshSnapshot: false });
+  renderOpenStashIdentificationApps(actor?.id);
+  if (actor?.id) {
+    game.socket?.emit?.(SOCKET_CHANNEL, {
+      action: "stash-refreshed",
+      partyActorId: actor.id,
+      requestedBy: game.user.id
+    });
+  }
 }
 
 function isMemberCandidate(actor) {
@@ -1139,10 +1164,126 @@ function formatSelectionTrait(raw, collections = []) {
   return values.join(", ") || "—";
 }
 
+function getActorContextNotes(actor, targets = [], rollData = null) {
+  if (!actor || typeof actor.getContextNotes !== "function") return [];
+  rollData ??= typeof actor.getRollData === "function" ? actor.getRollData() : {};
+  const notes = [];
+  for (const target of targets) {
+    try {
+      const raw = actor.getContextNotes(target) ?? [];
+      const formatted = typeof actor.formatContextNotes === "function" ? actor.formatContextNotes(raw, rollData) : raw;
+      notes.push(...arrayFromMaybeObject(formatted).map(note => String(note ?? "").trim()).filter(Boolean));
+    } catch (error) {
+      console.debug(`${MODULE_ID} | Could not collect context notes for ${target}`, error);
+    }
+  }
+  return [...new Set(notes)];
+}
+
+function buildActorBonusTooltip(actor, {
+  label,
+  total,
+  paths = [],
+  formulas = [],
+  sourcePaths = null,
+  contexts = [],
+  extra = [],
+  rollData = null
+}) {
+  rollData ??= typeof actor?.getRollData === "function" ? actor.getRollData() : {};
+  const formulaRows = formulas.length
+    ? formulas.map(row => ({ path: String(row?.path ?? label), value: String(row?.value ?? "—") }))
+    : paths.map((path, index) => {
+      const raw = gprop(actor, path);
+      const value = raw && typeof raw === "object"
+        ? raw.total ?? raw.value ?? (index === 0 ? total : "—")
+        : raw ?? (index === 0 ? total : "—");
+      return {
+        path: `@${String(path).replace(/^system\./, "")}`,
+        value: String(value ?? "—")
+      };
+    });
+  if (!formulaRows.length) formulaRows.push({ path: label, value: String(total ?? "—") });
+
+  const details = [];
+  for (const path of sourcePaths ?? paths) {
+    const sourceRows = actor?.sourceDetails?.[path] ?? gprop(actor?.sourceDetails, path);
+    for (const row of arrayFromMaybeObject(sourceRows)) {
+      const name = String(row?.name ?? "").trim();
+      const value = row?.value;
+      if (!name && (value === undefined || value === null || value === "")) continue;
+      const modifierId = typeof row?.modifier === "string" ? row.modifier.trim() : "";
+      details.push({
+        name: name || "Бонус",
+        value: Number.isFinite(Number(value)) ? signed(Number(value)) : String(value ?? ""),
+        modifier: modifierId ? configLabel(CONFIG.PF1?.bonusModifiers, modifierId, modifierId) : ""
+      });
+    }
+  }
+  for (const row of extra) {
+    if (!row) continue;
+    details.push({ name: String(row.name ?? "Бонус"), value: String(row.value ?? ""), modifier: String(row.modifier ?? "") });
+  }
+  const noteRows = getActorContextNotes(actor, contexts, rollData);
+  const fromSources = game.i18n.localize("PF1.FromSources") || "Из источников";
+  const contextNotes = game.i18n.localize("PF1.ContextNotes") || "Ситуативные примечания";
+  const formulaHtml = formulaRows
+    .map(row => `<span class="span2 align-left pf1-stat-tooltip-formula">${escapeHTML(row.path)} :</span><span class="span1 align-right">${escapeHTML(row.value)}</span>`)
+    .join("");
+  const detailHtml = details.length
+    ? `<span class="span3 pf1-stat-tooltip-source-heading"><br>${escapeHTML(fromSources)}:</span>${details.map(row => `<span class="span1 align-left">${escapeHTML(row.name)}: </span><span class="span1 align-rightspaced">${escapeHTML(row.value)}</span><span class="span1 align-right">${row.modifier ? `[${escapeHTML(row.modifier)}]` : ""}</span>`).join("")}`
+    : "";
+  const notesHtml = noteRows.length
+    ? `<span class="span3 pf1-stat-tooltip-context-heading"><br>${escapeHTML(contextNotes)}</span>${noteRows.map(note => `<span class="tooltipcontent-context">${note}</span>`).join("")}`
+    : "";
+  return `<span class="tooltipcontent pf1-stat-bonus-tooltip">${formulaHtml}${detailHtml}${notesHtml}</span>`;
+}
+
+function getSocialDefense(actor, combat) {
+  const system = actor.system ?? gprop(actor, "data.data") ?? {};
+  const wisdomModifier = toNumber(system.abilities?.wis?.mod, 0);
+  const hitDice = Math.max(0, firstNumber(actor, ["system.attributes.hd.total", "system.details.level.value"], 0));
+  const senseMotive = getSkillBonus(actor, "sen");
+  const demoralize = 10 + hitDice + wisdomModifier;
+  const feintByBab = 10 + toNumber(combat?.bab, 0) + wisdomModifier;
+  const feintBySenseMotive = 10 + senseMotive;
+  const feint = Math.max(feintByBab, feintBySenseMotive);
+  return {
+    demoralize: {
+      total: demoralize,
+      tooltipHtml: buildActorBonusTooltip(actor, {
+        label: "Сложность Деморализации",
+        total: demoralize,
+        contexts: ["skill.int"],
+        extra: [
+          { name: "База", value: 10 },
+          { name: "Кости здоровья", value: hitDice },
+          { name: "Модификатор Мудрости", value: signed(wisdomModifier) }
+        ]
+      })
+    },
+    feint: {
+      total: feint,
+      tooltipHtml: buildActorBonusTooltip(actor, {
+        label: "Сложность Финта",
+        total: feint,
+        contexts: ["skill.sen"],
+        extra: [
+          { name: "База", value: 10 },
+          { name: "БМА + Мудрость", value: signed(toNumber(combat?.bab, 0) + wisdomModifier) },
+          { name: "Проницательность", value: signed(senseMotive) }
+        ]
+      })
+    }
+  };
+}
+
 function getActorStatistics(actor) {
   const system = actor.system ?? gprop(actor, "data.data") ?? {};
   const attributes = system.attributes ?? {};
   const traits = system.traits ?? {};
+  const rollData = typeof actor.getRollData === "function" ? actor.getRollData() : {};
+  const tooltip = options => buildActorBonusTooltip(actor, { rollData, ...options });
   const abilities = Object.entries(system.abilities ?? {}).map(([id, ability]) => ({
     id,
     label: configLabel(CONFIG.PF1?.abilities, id, ABILITY_LABELS_RU[id] ?? id.toUpperCase()),
@@ -1155,7 +1296,27 @@ function getActorStatistics(actor) {
     valuePath: `system.abilities.${id}.value`,
     damagePath: `system.abilities.${id}.damage`,
     drainPath: `system.abilities.${id}.drain`,
-    penaltyPath: `system.abilities.${id}.userPenalty`
+    penaltyPath: `system.abilities.${id}.userPenalty`,
+    tooltipHtml: tooltip({
+      label: configLabel(CONFIG.PF1?.abilities, id, ABILITY_LABELS_RU[id] ?? id.toUpperCase()),
+      total: toNumber(ability?.total ?? ability?.value, 0),
+      formulas: [
+        { path: `@abilities.${id}.total`, value: ability?.total },
+        { path: `@abilities.${id}.value`, value: ability?.value },
+        { path: `@abilities.${id}.mod`, value: ability?.mod },
+        { path: `@abilities.${id}.damage`, value: ability?.damage },
+        { path: `@abilities.${id}.drain`, value: ability?.drain },
+        { path: `@abilities.${id}.penalty`, value: ability?.penalty },
+        { path: `@abilities.${id}.base`, value: ability?.base },
+        { path: `@abilities.${id}.baseMod`, value: ability?.baseMod }
+      ],
+      sourcePaths: [
+        `system.abilities.${id}.total`,
+        `system.abilities.${id}.penalty`,
+        `system.abilities.${id}.mod`
+      ],
+      contexts: [`abilityChecks.${id}`]
+    })
   }));
   const hp = getHp(actor);
   const hpMax = Math.max(0, toNumber(hp.max, 0));
@@ -1172,7 +1333,19 @@ function getActorStatistics(actor) {
     icon: SPEED_ICONS[id],
     base: toNumber(speedData?.[id]?.base, 0),
     total: toNumber(speedData?.[id]?.total ?? speedData?.[id]?.base, 0),
-    path: `system.attributes.speed.${id}.base`
+    path: `system.attributes.speed.${id}.base`,
+    tooltipHtml: tooltip({
+      label: SPEED_LABELS_RU[id],
+      total: toNumber(speedData?.[id]?.total ?? speedData?.[id]?.base, 0),
+      formulas: [
+        { path: `@attributes.speed.${id}.total`, value: speedData?.[id]?.total ?? speedData?.[id]?.base }
+      ],
+      sourcePaths: [
+        `system.attributes.speed.${id}.base`,
+        `system.attributes.speed.${id}.add`,
+        `system.attributes.speed.${id}.total`
+      ]
+    })
   }));
   const size = String(traits.size ?? "med");
   const sizeModifier = toNumber(CONFIG.PF1?.sizeMods?.[size], 0);
@@ -1209,20 +1382,80 @@ function getActorStatistics(actor) {
       .map(([value, label]) => ({ value, label: configLabel(CONFIG.PF1?.actorSizes, value, label), selected: value === size })),
     initiative: {
       total: firstNumber(actor, ["system.attributes.init.total", "system.attributes.init.value"], 0),
-      value: toNumber(attributes.init?.value, 0)
+      value: toNumber(attributes.init?.value, 0),
+      tooltipHtml: tooltip({
+        label: "Инициатива",
+        total: firstNumber(actor, ["system.attributes.init.total", "system.attributes.init.value"], 0),
+        formulas: [{ path: "@attributes.init.total", value: attributes.init?.total }],
+        sourcePaths: ["system.attributes.init.total"],
+        contexts: ["misc.init"]
+      })
     },
     saves: {
-      fort: { total: saves.fort, base: toNumber(attributes.savingThrows?.fort?.base, 0) },
-      ref: { total: saves.ref, base: toNumber(attributes.savingThrows?.ref?.base, 0) },
-      will: { total: saves.will, base: toNumber(attributes.savingThrows?.will?.base, 0) }
+      fort: { total: saves.fort, base: toNumber(attributes.savingThrows?.fort?.base, 0), tooltipHtml: tooltip({ label: "Стойкость", total: saves.fort, formulas: [{ path: "@attributes.savingThrows.fort.total", value: saves.fort }], sourcePaths: ["system.attributes.savingThrows.fort.total"], contexts: ["savingThrow.fort"] }) },
+      ref: { total: saves.ref, base: toNumber(attributes.savingThrows?.ref?.base, 0), tooltipHtml: tooltip({ label: "Реакция", total: saves.ref, formulas: [{ path: "@attributes.savingThrows.ref.total", value: saves.ref }], sourcePaths: ["system.attributes.savingThrows.ref.total"], contexts: ["savingThrow.ref"] }) },
+      will: { total: saves.will, base: toNumber(attributes.savingThrows?.will?.base, 0), tooltipHtml: tooltip({ label: "Воля", total: saves.will, formulas: [{ path: "@attributes.savingThrows.will.total", value: saves.will }], sourcePaths: ["system.attributes.savingThrows.will.total"], contexts: ["savingThrow.will"] }) }
     },
-    ac: combat.ac,
+    ac: {
+      normal: combat.ac.normal,
+      touch: combat.ac.touch,
+      flatFooted: combat.ac.flatFooted,
+      normalTooltipHtml: tooltip({ label: "КБ", total: combat.ac.normal, formulas: [{ path: "@attributes.ac.normal.total", value: combat.ac.normal }, { path: "@armor.type", value: rollData?.armor?.type ?? 0 }, { path: "@shield.type", value: rollData?.shield?.type ?? 0 }], sourcePaths: ["system.attributes.ac.normal.total"], contexts: ["misc.ac"] }),
+      touchTooltipHtml: tooltip({ label: "Касание", total: combat.ac.touch, formulas: [{ path: "@attributes.ac.touch.total", value: combat.ac.touch }, { path: "@armor.type", value: rollData?.armor?.type ?? 0 }, { path: "@shield.type", value: rollData?.shield?.type ?? 0 }], sourcePaths: ["system.attributes.ac.touch.total"], contexts: ["misc.ac"] }),
+      flatFootedTooltipHtml: tooltip({ label: "Врасплох", total: combat.ac.flatFooted, formulas: [{ path: "@attributes.ac.flatFooted.total", value: combat.ac.flatFooted }, { path: "@armor.type", value: rollData?.armor?.type ?? 0 }, { path: "@shield.type", value: rollData?.shield?.type ?? 0 }], sourcePaths: ["system.attributes.ac.flatFooted.total"], contexts: ["misc.ac"] })
+    },
     combat: {
       bab: combat.bab,
       cmd: combat.cmd,
       cmb: combat.cmb,
       melee: combat.melee,
-      ranged: combat.ranged
+      ranged: combat.ranged,
+      babTooltipHtml: tooltip({ label: "БМА", total: combat.bab, formulas: [{ path: "@attributes.bab.total", value: combat.bab }], sourcePaths: ["system.attributes.bab.total"] }),
+      cmdTooltipHtml: tooltip({ label: "ЗБМ", total: combat.cmd, formulas: [{ path: "@attributes.cmd.total", value: combat.cmd }], sourcePaths: ["system.attributes.cmd.total"], contexts: ["misc.cmd"] }),
+      cmbTooltipHtml: tooltip({
+        label: "МБМ",
+        total: combat.cmb,
+        formulas: [
+          { path: "@attributes.cmb.total", value: combat.cmb },
+          { path: "@attributes.cmb.bonus", value: attributes.cmb?.bonus ?? 0 },
+          { path: "+ @attributes.attack.shared", value: attributes.attack?.shared ?? 0 },
+          { path: "+ @attributes.attack.general", value: attributes.attack?.general ?? 0 }
+        ],
+        sourcePaths: ["system.attributes.attack.shared", "system.attributes.attack.general", "system.attributes.cmb.bonus"],
+        contexts: ["misc.cmb"],
+        extra: [
+          ...(size !== "med" ? [{ name: "Размер", value: signed(toNumber(CONFIG.PF1?.sizeSpecialMods?.[size], 0)) }] : []),
+          ...(attributes.cmbAbility ? [{ name: configLabel(CONFIG.PF1?.abilities, attributes.cmbAbility, attributes.cmbAbility), value: signed(toNumber(system.abilities?.[attributes.cmbAbility]?.mod, 0)) }] : [])
+        ]
+      }),
+      meleeTooltipHtml: tooltip({
+        label: "Ближний бой",
+        total: combat.melee,
+        formulas: [
+          { path: "+ @attributes.attack.shared", value: attributes.attack?.shared ?? 0 },
+          { path: "+ @attributes.attack.general", value: attributes.attack?.general ?? 0 },
+          { path: "+ @attributes.attack.melee", value: attributes.attack?.melee ?? 0 }
+        ],
+        sourcePaths: ["system.attributes.attack.shared", "system.attributes.attack.general", "system.attributes.attack.melee"],
+        extra: [
+          ...(attributes.attack?.meleeAbility ? [{ name: configLabel(CONFIG.PF1?.abilities, attributes.attack.meleeAbility, attributes.attack.meleeAbility), value: signed(toNumber(system.abilities?.[attributes.attack.meleeAbility]?.mod, 0)) }] : []),
+          ...(size !== "med" ? [{ name: "Размер", value: signed(toNumber(CONFIG.PF1?.sizeMods?.[size], 0)) }] : [])
+        ]
+      }),
+      rangedTooltipHtml: tooltip({
+        label: "Дистанционный бой",
+        total: combat.ranged,
+        formulas: [
+          { path: "+ @attributes.attack.shared", value: attributes.attack?.shared ?? 0 },
+          { path: "+ @attributes.attack.general", value: attributes.attack?.general ?? 0 },
+          { path: "+ @attributes.attack.ranged", value: attributes.attack?.ranged ?? 0 }
+        ],
+        sourcePaths: ["system.attributes.attack.shared", "system.attributes.attack.general", "system.attributes.attack.ranged"],
+        extra: [
+          ...(attributes.attack?.rangedAbility ? [{ name: configLabel(CONFIG.PF1?.abilities, attributes.attack.rangedAbility, attributes.attack.rangedAbility), value: signed(toNumber(system.abilities?.[attributes.attack.rangedAbility]?.mod, 0)) }] : []),
+          ...(size !== "med" ? [{ name: "Размер", value: signed(toNumber(CONFIG.PF1?.sizeMods?.[size], 0)) }] : [])
+        ]
+      })
     },
     naturalAC: toNumber(attributes.naturalAC, 0),
     spellResistanceFormula: String(attributes.sr?.formula ?? ""),
@@ -1257,7 +1490,8 @@ function getActorStatistics(actor) {
       }
     ],
     fastHealing: String(traits.fastHealing ?? ""),
-    regeneration: String(traits.regen ?? "")
+    regeneration: String(traits.regen ?? ""),
+    socialDefense: getSocialDefense(actor, combat)
   };
 }
 
@@ -1941,16 +2175,21 @@ function isItemIdentified(source) {
 function getUnidentifiedItemName(source) {
   return firstNonEmptyString(
     gprop(source, "system.unidentified.name"),
+    source?.["system.unidentified.name"],
+    source?.system?.["unidentified.name"],
     gprop(source, "system.unidentifiedName"),
     gprop(source, "system.nameUnidentified"),
     gprop(source, "data.data.unidentified.name"),
+    source?.data?.data?.["unidentified.name"],
     gprop(source, "data.data.unidentifiedName"),
     gprop(source, "unidentifiedName")
   );
 }
 
 function getItemDisplayName(source, fallback = "Предмет") {
-  if (!isItemIdentified(source)) return getUnidentifiedItemName(source) || "Неопознанный предмет";
+  if (!isItemIdentified(source)) {
+    return getUnidentifiedItemName(source) || firstNonEmptyString(source?.name, fallback) || fallback;
+  }
   return firstNonEmptyString(source?.name, fallback) || fallback;
 }
 
@@ -2209,16 +2448,54 @@ async function setStashEntriesIdentifiedWithAuthority(partyActor, entries, ident
 }
 
 async function handlePartyFolderSocket(payload) {
-  if (!payload || payload.action !== "set-stash-identification" || !game.user.isGM) return;
+  if (!payload) return;
+  if (payload.action === "stash-refreshed") {
+    const partyActor = game.actors?.get(payload.partyActorId);
+    if (!partyActor?.getFlag?.(MODULE_ID, PARTY_FLAG)) return;
+    renderOpenPartySheets({ refreshSnapshot: false });
+    renderOpenStashIdentificationApps(partyActor.id);
+    return;
+  }
+  if (!game.user.isGM) return;
   const activeGM = game.users?.activeGM;
   if (activeGM && !activeGM.isSelf) return;
   const requester = game.users?.get(payload.requestedBy);
   const partyActor = game.actors?.get(payload.partyActorId);
   if (!requester?.active || !partyActor?.getFlag?.(MODULE_ID, PARTY_FLAG)) return;
-  const entries = serializeIdentificationEntries(payload.entries).slice(0, 250);
-  if (!entries.length) return;
-  await setStashEntriesIdentified(partyActor, entries, payload.identified === true);
-  renderOpenPartySheets();
+  if (payload.action === "set-stash-identification") {
+    const entries = serializeIdentificationEntries(payload.entries).slice(0, 250);
+    if (!entries.length) return;
+    await setStashEntriesIdentified(partyActor, entries, payload.identified === true);
+    renderOpenPartySheets({ refreshSnapshot: false, immediate: true });
+    renderOpenStashIdentificationApps(partyActor.id);
+    return;
+  }
+  if (payload.action === "roll-stash-identification") {
+    const actor = game.actors?.get(payload.actorId);
+    const members = getPartyMembers(partyActor, { ignorePermissions: true });
+    if (!actor || !members.some(member => member.id === actor.id)) return;
+    const metagame = getPartyMetagameSettings(partyActor);
+    if (metagame.identifyOnlyAsSelf && !requester.isGM && requester.character?.id !== actor.id) return;
+    const available = buildStashIdentificationData(getStash(partyActor)).unidentified;
+    const requested = serializeIdentificationEntries(payload.entries).slice(0, 250);
+    const targets = requested.map(reference => available.find(entry =>
+      entry.stashId === reference.stashId
+      && (entry.containerItemId ?? null) === (reference.containerItemId ?? null)
+    )).filter(Boolean);
+    if (!targets.length) return;
+    const rollMode = ["publicroll", "gmroll", "blindroll", "selfroll"].includes(payload.rollMode)
+      ? payload.rollMode
+      : "publicroll";
+    await performStashIdentificationRolls(partyActor, actor, targets, { skipDialog: true, rollMode });
+    return;
+  }
+  if (payload.action === "quick-party-roll") {
+    const kind = payload.kind === "save" ? "save" : "skill";
+    const definition = getQuickRollDefinition(kind, String(payload.checkId ?? ""));
+    if (!definition) return;
+    const rollMode = payload.rollMode === "blindroll" ? "blindroll" : "publicroll";
+    await performPartyQuickRoll(partyActor, kind, definition.id, rollMode);
+  }
 }
 
 function getStashItemView(stashItem) {
@@ -2861,6 +3138,15 @@ function getItemDescriptionHTML(itemSource) {
 
 function buildStashItemEntry(oldEntry, itemSource) {
   const source = getStashItemSource(itemSource);
+  const oldSource = oldEntry ? getStashItemSource(oldEntry) : null;
+  const oldUnidentifiedName = getUnidentifiedItemName(oldSource);
+  if (!getUnidentifiedItemName(source) && oldUnidentifiedName) {
+    sprop(source, "system.unidentified.name", oldUnidentifiedName);
+  }
+  const unidentifiedName = getUnidentifiedItemName(source);
+  if (!isItemIdentified(source) && unidentifiedName && source.name === unidentifiedName && oldSource?.name) {
+    source.name = oldSource.name;
+  }
   const quantity = getItemQuantity(source);
   return {
     ...oldEntry,
@@ -3269,6 +3555,80 @@ function schedulePublicPartySnapshotRefresh(partyActor = getPartyActor()) {
     refreshPublicPartySnapshot(party).catch(err => console.warn(`${MODULE_ID} | Public party snapshot refresh failed`, err));
   }, 150);
   publicSnapshotRefreshTimers.set(partyId, timer);
+}
+
+function getRollFromChatResult(result) {
+  if (!result) return null;
+  if (result instanceof Roll) return result;
+  const rolls = Array.isArray(result.rolls) ? result.rolls : [];
+  return rolls[0] ?? result.roll ?? result._roll ?? null;
+}
+
+function getChatMessageFromRollResult(result) {
+  if (!result) return null;
+  if (result.documentName === "ChatMessage" || result.constructor?.documentName === "ChatMessage") return result;
+  if (result.id && game.messages?.get(result.id)) return game.messages.get(result.id);
+  return null;
+}
+
+async function performNativeActorCheck(actor, kind, checkId, { skipDialog = true, rollMode = null } = {}) {
+  if (!actor) return null;
+  const options = { event: null, skipDialog };
+  if (rollMode) options.rollMode = rollMode;
+  let result = null;
+  if (kind === "skill" && typeof actor.rollSkill === "function") {
+    result = await actor.rollSkill(checkId, options);
+  } else if (kind === "save" && typeof actor.rollSavingThrow === "function") {
+    result = await actor.rollSavingThrow(checkId, options);
+  } else {
+    ui.notifications.warn(`Штатный бросок PF1 для «${actor.name}» недоступен.`);
+    return null;
+  }
+  if (!result) return null;
+  const message = getChatMessageFromRollResult(result);
+  const roll = getRollFromChatResult(result) ?? getRollFromChatResult(message);
+  return { result, message, roll, total: toNumber(roll?.total, Number.NaN) };
+}
+
+function getQuickRollDefinition(kind, checkId) {
+  const collection = kind === "save" ? QUICK_PARTY_ROLLS.saves : QUICK_PARTY_ROLLS.skills;
+  return collection.find(entry => entry.id === checkId) ?? null;
+}
+
+async function postPartyQuickRollSummary(partyActor, definition, rows, rollMode) {
+  if (!rows.length) return null;
+  const average = Math.floor(rows.reduce((sum, row) => sum + row.total, 0) / rows.length);
+  const hidden = rollMode === "blindroll";
+  const content = `<section class="pf1-party-quick-roll-summary">
+    <h3><i class="${escapeHTML(definition.icon)}"></i> ${escapeHTML(definition.label)}</h3>
+    <div class="pf1-party-quick-roll-results">${rows.map(row => `<div><span>${escapeHTML(row.actor.name)}</span><b>${escapeHTML(row.total)}</b></div>`).join("")}</div>
+    <footer><span>Среднее значение</span><strong>${average}</strong></footer>
+  </section>`;
+  const data = {
+    speaker: ChatMessage.getSpeaker({ actor: partyActor }),
+    content,
+    flags: { [MODULE_ID]: { quickPartyRollSummary: true, partyActorId: partyActor.id, checkId: definition.id, average } }
+  };
+  if (hidden) {
+    data.whisper = [...game.users].filter(user => user.isGM).map(user => user.id);
+    data.blind = true;
+  }
+  return ChatMessage.create(data);
+}
+
+async function performPartyQuickRoll(partyActor, kind, checkId, rollMode = "publicroll") {
+  const definition = getQuickRollDefinition(kind, checkId);
+  if (!partyActor || !definition) return null;
+  const actors = getPartyMembers(partyActor, { ignorePermissions: true });
+  if (!actors.length) return ui.notifications.warn("В этой папке партии нет персонажей для броска.");
+  const rows = [];
+  for (const actor of actors) {
+    const nativeResult = await performNativeActorCheck(actor, kind, checkId, { skipDialog: true, rollMode });
+    if (!nativeResult || !Number.isFinite(nativeResult.total)) continue;
+    rows.push({ actor, total: nativeResult.total });
+  }
+  if (!rows.length) return ui.notifications.warn("PF1 не смог выполнить ни одного броска.");
+  return postPartyQuickRollSummary(partyActor, definition, rows, rollMode);
 }
 
 async function rollSkill(actor, skillId, { flavor = null, extraBonus = 0, dc = null, heroPointBonus = 0, partyActor = null } = {}) {
@@ -4116,6 +4476,7 @@ class PF1PartyActorSheet extends ActorSheet {
     this._stashQuantityTimers = new Map();
     this._openStashContainers = new Set();
     this._statisticsTab = "abilities";
+    this._quickRollMode = "publicroll";
   }
 
   static get defaultOptions() {
@@ -4216,6 +4577,12 @@ class PF1PartyActorSheet extends ActorSheet {
       knowledgeSkills,
       skillGroups: buildSkillGroups(skills, isBackgroundPartySkill),
       knowledgeGroups: buildSkillGroups(knowledgeSkills, isBackgroundKnowledgeSkill),
+      quickRollGroups: [
+        { id: "skills", label: "Навыки", kind: "skill", items: QUICK_PARTY_ROLLS.skills },
+        { id: "saves", label: "Испытания", kind: "save", items: QUICK_PARTY_ROLLS.saves }
+      ],
+      quickRollPublic: this._quickRollMode !== "blindroll",
+      quickRollHidden: this._quickRollMode === "blindroll",
       travel: stats.travel,
       stash: buildStashView(stash, this._openStashContainers),
       stashTotals: buildStashTotals(stash),
@@ -4225,6 +4592,38 @@ class PF1PartyActorSheet extends ActorSheet {
 
   activateListeners(html) {
     super.activateListeners(html);
+
+    document.querySelectorAll(".pf1-party-floating-stat-tooltip").forEach(tooltip => tooltip.remove());
+    let floatingStatTooltip = null;
+    const hideFloatingStatTooltip = () => {
+      floatingStatTooltip?.remove();
+      floatingStatTooltip = null;
+    };
+    const positionFloatingStatTooltip = event => {
+      if (!floatingStatTooltip) return;
+      const gap = 8;
+      const pointerX = Number(event.clientX) || 0;
+      const pointerY = Number(event.clientY) || 0;
+      const bounds = floatingStatTooltip.getBoundingClientRect();
+      let left = pointerX;
+      let top = pointerY + 24;
+      if (left + bounds.width > window.innerWidth - gap) left = window.innerWidth - bounds.width - gap;
+      if (top + bounds.height > window.innerHeight - gap) top = pointerY - bounds.height - 12;
+      floatingStatTooltip.style.left = `${Math.max(gap, left)}px`;
+      floatingStatTooltip.style.top = `${Math.max(gap, top)}px`;
+    };
+    html.on("mouseenter.pf1PartyNativeTooltip", ".tooltip", event => {
+      const source = event.currentTarget.querySelector(":scope > .tooltipcontent.pf1-stat-bonus-tooltip");
+      if (!source) return;
+      hideFloatingStatTooltip();
+      floatingStatTooltip = source.cloneNode(true);
+      floatingStatTooltip.classList.remove("tooltipcontent");
+      floatingStatTooltip.classList.add("pf1-party-floating-stat-tooltip");
+      document.body.append(floatingStatTooltip);
+      positionFloatingStatTooltip(event);
+    });
+    html.on("mousemove.pf1PartyNativeTooltip", ".tooltip", event => positionFloatingStatTooltip(event));
+    html.on("mouseleave.pf1PartyNativeTooltip", ".tooltip", hideFloatingStatTooltip);
 
     html.find(".pf1-party-token-drag").on("dragstart", event => this._onPartyTokenDragStart(event));
 
@@ -4865,6 +5264,19 @@ class PF1PartyActorSheet extends ActorSheet {
       case "roll-initiative":
         if (actor) await rollInitiativeCheck(actor, button.dataset.bonus);
         break;
+      case "quick-party-roll":
+        await this._quickPartyRoll(button.dataset.kind, button.dataset.checkId);
+        break;
+      case "set-quick-roll-mode": {
+        this._quickRollMode = button.dataset.rollMode === "blindroll" ? "blindroll" : "publicroll";
+        const panel = button.closest("[data-tab='quick-rolls']");
+        panel?.querySelectorAll("[data-action='set-quick-roll-mode']").forEach(modeButton => {
+          const active = modeButton.dataset.rollMode === this._quickRollMode;
+          modeButton.classList.toggle("is-active", active);
+          modeButton.setAttribute("aria-pressed", String(active));
+        });
+        return;
+      }
       case "open-actor-traits":
         if (actor) await openActorTraitEditor(actor, button.dataset.traitId);
         return;
@@ -5058,6 +5470,29 @@ class PF1PartyActorSheet extends ActorSheet {
       heroPointBonus,
       partyActor: this.actor
     });
+  }
+
+  async _quickPartyRoll(kind, checkId) {
+    const definition = getQuickRollDefinition(kind, checkId);
+    if (!definition) return;
+    const rollMode = this._quickRollMode === "blindroll" ? "blindroll" : "publicroll";
+    const members = getPartyMembers(this.actor, { ignorePermissions: true });
+    const canRollLocally = game.user.isGM || members.every(actor => actor.isOwner || actor.testUserPermission?.(game.user, "OWNER"));
+    if (canRollLocally) {
+      await performPartyQuickRoll(this.actor, kind, checkId, rollMode);
+      return;
+    }
+    const activeGM = game.users?.activeGM;
+    if (!activeGM?.active) return ui.notifications.warn("Для бросков за всю партию нужен активный игровой мастер.");
+    game.socket.emit(SOCKET_CHANNEL, {
+      action: "quick-party-roll",
+      partyActorId: this.actor.id,
+      kind,
+      checkId,
+      rollMode,
+      requestedBy: game.user.id
+    });
+    ui.notifications.info("Запрос на быстрые броски отправлен игровому мастеру.");
   }
 
   async _longRest() {
@@ -5350,11 +5785,73 @@ function playRuImprovementsCurseRevealSound() {
   if (!enabled || !volume) return;
   const src = `modules/${RU_IMPROVEMENTS_ID}/assets/audio/curse-reveal.mp3`;
   try {
-    const playback = AudioHelper.play({ src, volume, autoplay: true, loop: false }, false);
+    // Match Ru Improvements: Foundry pushes the reveal sound to every connected client.
+    const playback = AudioHelper.play({ src, volume, autoplay: true, loop: false }, true);
     playback?.catch?.(error => console.warn(`${MODULE_ID} | Не удалось воспроизвести звук раскрытого проклятия.`, error));
   } catch (error) {
     console.warn(`${MODULE_ID} | Не удалось воспроизвести звук раскрытого проклятия.`, error);
   }
+}
+
+async function performStashIdentificationRolls(partyActor, actor, targets, {
+  skipDialog = true,
+  rollMode = game.settings.get("core", "rollMode") || "publicroll"
+} = {}) {
+  if (!partyActor || !actor || !targets?.length) return [];
+  const metagame = getPartyMetagameSettings(partyActor);
+  const results = [];
+  for (const entry of targets) {
+    const nativeResult = await performNativeActorCheck(actor, "skill", "spl", { skipDialog, rollMode });
+    if (!nativeResult?.roll || !Number.isFinite(nativeResult.total)) {
+      ui.notifications.warn(`PF1 не смог выполнить проверку Колдовства для «${entry.name}».`);
+      continue;
+    }
+    const result = {
+      ...entry,
+      roll: nativeResult.roll,
+      success: nativeResult.total >= toNumber(entry.identifyDC, Number.POSITIVE_INFINITY),
+      curseSuccess: entry.cursed === true
+        && nativeResult.total >= toNumber(entry.curseIdentifyDC, Number.POSITIVE_INFINITY)
+    };
+    results.push(result);
+    const resultName = result.success ? result.realName || result.name : result.name;
+    const flavor = `<section class="pf1-identification-chat-result ${result.success ? "success" : "failure"}" data-hide-identification-dc="${metagame.hideIdentificationDC ? "true" : "false"}">
+      <h4>${escapeHTML(resultName)}</h4>
+      <p class="pf1-identification-chat-dc">Сложность опознания: <b>${result.identifyDC}</b></p>
+      <p class="pf1-identification-chat-state"><i class="fas ${result.success ? "fa-check" : "fa-times"}"></i><b>${result.success ? "Успех" : "Провал"}</b></p>
+      ${result.curseSuccess ? '<p class="pf1-identification-chat-curse"><i class="fas fa-skull"></i><b>Предмет проклят!</b></p>' : ""}
+    </section>`;
+    const identificationFlags = {
+      identificationResult: true,
+      actorId: actor.id,
+      stashId: result.stashId,
+      containerItemId: result.containerItemId ?? null,
+      identifyDC: result.identifyDC,
+      curseIdentifyDC: result.cursed ? result.curseIdentifyDC : null,
+      success: result.success,
+      curseSuccess: result.curseSuccess
+    };
+    if (nativeResult.message) {
+      await nativeResult.message.update({ flavor, [`flags.${MODULE_ID}`]: identificationFlags });
+    } else {
+      await nativeResult.roll.toMessage({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        flavor,
+        rollMode,
+        flags: { [MODULE_ID]: identificationFlags }
+      });
+    }
+    if (activeRuImprovementsModule() && result.success && result.cursed && !result.curseSuccess) {
+      await whisperFailedStashCurseIdentification(actor, result);
+    }
+    if (activeRuImprovementsModule() && result.curseSuccess) playRuImprovementsCurseRevealSound();
+  }
+  const successful = results.filter(entry => entry.success);
+  if (metagame.autoIdentifyItems && successful.length) {
+    await setStashEntriesIdentifiedWithAuthority(partyActor, successful, true);
+    ui.notifications.info(`Автоматически опознано предметов: ${successful.length}.`);
+  }
+  return results;
 }
 
 class PF1StashIdentificationApp extends Application {
@@ -5467,62 +5964,25 @@ class PF1StashIdentificationApp extends Application {
     });
     const actor = actorId ? game.actors.get(actorId) : null;
     if (!actor) return;
-    const bonus = getSkillBonus(actor, "spl");
-    const formula = bonus >= 0 ? `1d20 + ${bonus}` : `1d20 - ${Math.abs(bonus)}`;
-    const metagame = getPartyMetagameSettings(this.partyActor);
-    const results = [];
-    for (const entry of targets) {
-      const roll = await new Roll(formula).roll({ async: true });
-      const result = {
-        ...entry,
-        roll,
-        success: toNumber(roll.total, 0) >= toNumber(entry.identifyDC, Number.POSITIVE_INFINITY),
-        curseSuccess: entry.cursed === true
-          && toNumber(roll.total, 0) >= toNumber(entry.curseIdentifyDC, Number.POSITIVE_INFINITY)
-      };
-      results.push(result);
-      const resultName = result.success ? result.realName || result.name : result.name;
-      await roll.toMessage({
-        speaker: ChatMessage.getSpeaker({ actor }),
-        flavor: `<section class="pf1-identification-chat-result ${result.success ? "success" : "failure"}" data-hide-identification-dc="${metagame.hideIdentificationDC ? "true" : "false"}">
-          <h4>${escapeHTML(resultName)}</h4>
-          <p class="pf1-identification-chat-dc">Сложность опознания: <b>${result.identifyDC}</b></p>
-          <p class="pf1-identification-chat-state"><i class="fas ${result.success ? "fa-check" : "fa-times"}"></i><b>${result.success ? "Успех" : "Провал"}</b></p>
-          ${result.curseSuccess ? '<p class="pf1-identification-chat-curse"><i class="fas fa-skull"></i><b>Предмет проклят!</b></p>' : ""}
-        </section>`,
-        flags: {
-          pf1: { metadata: { rolls: {} } },
-          [MODULE_ID]: {
-            identificationResult: true,
-            actorId: actor.id,
-            stashId: result.stashId,
-            containerItemId: result.containerItemId ?? null,
-            identifyDC: result.identifyDC,
-            curseIdentifyDC: result.cursed ? result.curseIdentifyDC : null,
-            success: result.success,
-            curseSuccess: result.curseSuccess
-          }
-        }
+    const rollMode = game.settings.get("core", "rollMode") || "publicroll";
+    const canRollLocally = game.user.isGM || userOwnsActor(actor);
+    if (!canRollLocally) {
+      const activeGM = game.users?.activeGM;
+      if (!activeGM?.active) return ui.notifications.warn("Для нативного броска выбранного персонажа нужен активный игровой мастер.");
+      game.socket.emit(SOCKET_CHANNEL, {
+        action: "roll-stash-identification",
+        partyActorId: this.partyActor.id,
+        actorId: actor.id,
+        entries: serializeIdentificationEntries(targets),
+        rollMode,
+        requestedBy: game.user.id
       });
-      if (activeRuImprovementsModule() && result.success && result.cursed && !result.curseSuccess) {
-        await whisperFailedStashCurseIdentification(actor, result);
-      }
-      if (activeRuImprovementsModule() && result.curseSuccess) playRuImprovementsCurseRevealSound();
+      ui.notifications.info("Запрос на опознание отправлен игровому мастеру.");
+      return;
     }
-    const successful = results.filter(entry => entry.success);
-    if (metagame.autoIdentifyItems && successful.length) {
-      await setStashEntriesIdentifiedWithAuthority(this.partyActor, successful, true);
-    }
-    if (metagame.autoIdentifyItems && successful.length) {
-      ui.notifications.info(`Автоматически опознано предметов: ${successful.length}.`);
-    }
+    await performStashIdentificationRolls(this.partyActor, actor, targets, { skipDialog: false, rollMode });
     this.render(false);
-    if (!this.partyActor.testUserPermission?.(game.user, "OWNER") && metagame.autoIdentifyItems && successful.length) {
-      setTimeout(() => {
-        if (this.rendered) this.render(false);
-      }, 400);
-    }
-    renderOpenPartySheets();
+    renderOpenPartySheets({ refreshSnapshot: false });
   }
 
   async _toggleIdentification(event) {
@@ -5723,6 +6183,21 @@ function renderOpenPartySheets({ refreshSnapshot = true } = {}) {
       }
     }
   }, 45);
+}
+
+function renderOpenStashIdentificationApps(partyActorId) {
+  if (!partyActorId) return;
+  const previousTimer = stashIdentificationRenderTimers.get(partyActorId);
+  if (previousTimer) clearTimeout(previousTimer);
+  const timer = setTimeout(() => {
+    stashIdentificationRenderTimers.delete(partyActorId);
+    for (const app of Object.values(ui.windows ?? {})) {
+      if (!(app instanceof PF1StashIdentificationApp)) continue;
+      if (app.partyActor?.id !== partyActorId || !app.rendered) continue;
+      app.render(false);
+    }
+  }, 25);
+  stashIdentificationRenderTimers.set(partyActorId, timer);
 }
 
 function getChatMessageFromContext(li) {
@@ -6461,6 +6936,10 @@ Hooks.on("updateActor", async (actor, changed, options = {}, userId = null) => {
     );
   }
   const changedHeroPoints = has(changed, `flags.${MODULE_ID}.${HERO_POINTS_FLAG}`);
+  const changedStash = has(changed, `flags.${MODULE_ID}.${STASH_FLAG}`);
+  if (party && actor?.id === party.id && changedStash) {
+    renderOpenStashIdentificationApps(party.id);
+  }
   if (party && actor?.id === party.id && changedHeroPoints) {
     for (const actorId of Object.keys(getHeroPoints(party))) refreshHeroPointControls(actorId);
     return;

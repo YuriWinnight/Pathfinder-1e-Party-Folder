@@ -1,5 +1,42 @@
 # PF1e Party Folder
 
+## Changes in version 2.0.4
+
+- Replaced Foundry's stretched global statistic tooltip with the native PF1 actor-sheet tooltip markup and positioning.
+- Restored PF1 source-row alignment and native inline-roll colors for situational notes.
+- Kept the complete formula, source, modifier, and context-note data added in version 2.0.3.
+
+## Changes in version 2.0.3
+
+- Rebuilt statistic tooltips from the same formula rows, source groups, modifier types, and contextual notes used by PF1 actor sheets.
+- Added the omitted armor, shield, general attack, ability, size, CMD, and AC context details to their respective tooltips.
+- Restored the native PF1 three-column tooltip layout and constrained long notes to remain inside the translucent panel.
+
+## Changes in version 2.0.2
+
+- Expanded statistic tooltips and applied the translucent black PF1 actor-sheet presentation without text escaping their bounds.
+- Replaced the Stealth icon with a hooded rogue-style head.
+- Kept all ability names at the same size and enlarged combat-check cards instead of shrinking their labels.
+
+## Changes in version 2.0.1
+
+- Matched statistic source tooltips to the compact three-column layout used by native PF1 actor sheets.
+- Replaced the Stealth quick-roll icon with footprints.
+- Kept combat-check labels readable when the party window is narrowed and prevented Constitution from splitting its final letter.
+
+## Changes in version 2.0.0
+
+- Added a visible persistent switch between public and GM-only party quick rolls.
+- Restyled quick-roll checks to match the compact PF2e RU skill typography and replaced the Stealth icon.
+- Highlighted social defenses and rebuilt statistic tooltips in the native PF1 source-breakdown style.
+
+## Changes in version 1.9.9
+
+- Synchronized stash identification and unidentified display names across all connected clients and open identification tables.
+- Replaced static identification formulas with PF1 native Spellcraft checks, one complete actor-sheet roll per item.
+- Added party-wide quick rolls for five skills and all three saving throws, with public or GM-only summaries and a rounded-down average.
+- Added Demoralize and Feint defenses to statistics with source and situational-bonus tooltips.
+
 ## Changes in version 1.9.8
 
 - Replaced decorative corner marks with the same subtle inset and outer edge used by stash category bars.

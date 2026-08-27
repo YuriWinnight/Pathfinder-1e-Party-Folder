@@ -31,6 +31,7 @@
           <a class="item active" data-tab="languages">Языки партии</a>
           <a class="item" data-tab="skills">Навыки партии</a>
           <a class="item" data-tab="knowledge">Вспомнить информацию</a>
+          <a class="item" data-tab="quick-rolls">Быстрые броски</a>
         </nav>
 
         <section class="pf1-overview-content">
@@ -88,6 +89,31 @@
             {{else}}
               <div class="pf1-empty">У партии нет навыков знаний</div>
             {{/if}}
+          </div>
+
+          <div class="tab" data-group="overview" data-tab="quick-rolls">
+            <div class="pf1-quick-roll-groups">
+              <div class="pf1-quick-roll-mode" role="group" aria-label="Видимость быстрых бросков">
+                <button type="button" class="{{#if quickRollPublic}}is-active{{/if}}" data-action="set-quick-roll-mode" data-roll-mode="publicroll" aria-pressed="{{#if quickRollPublic}}true{{else}}false{{/if}}" title="Броски и сводка видны всем">
+                  <i class="fas fa-eye"></i><span>Публично</span>
+                </button>
+                <button type="button" class="{{#if quickRollHidden}}is-active{{/if}}" data-action="set-quick-roll-mode" data-roll-mode="blindroll" aria-pressed="{{#if quickRollHidden}}true{{else}}false{{/if}}" title="Броски и сводка видны только игровому мастеру">
+                  <i class="fas fa-user-secret"></i><span>Только игровому мастеру</span>
+                </button>
+              </div>
+              {{#each quickRollGroups}}
+                <section class="pf1-quick-roll-group">
+                  <h4>{{label}}</h4>
+                  <div class="pf1-quick-roll-buttons">
+                    {{#each items}}
+                      <button type="button" data-action="quick-party-roll" data-kind="{{../kind}}" data-check-id="{{id}}" title="Бросить за каждого персонажа партии">
+                        <i class="{{icon}}"></i><span>{{label}}</span>
+                      </button>
+                    {{/each}}
+                  </div>
+                </section>
+              {{/each}}
+            </div>
           </div>
         </section>
       </div>
@@ -198,7 +224,8 @@
                 <h4>Характеристики</h4>
                 <div class="pf1-stat-ability-cards">
                   {{#each statistics.abilities}}
-                    <article class="pf1-stat-ability-card">
+                    <article class="pf1-stat-ability-card tooltip">
+                      {{{tooltipHtml}}}
                       <button type="button" class="pf1-stat-roll-title" data-action="roll-ability" data-actor-id="{{../id}}" data-ability="{{id}}" data-bonus="{{mod}}" title="Бросить проверку характеристики {{label}}" {{#unless ../statistics.rollable}}disabled{{/unless}}><i class="fas fa-dice-d20"></i><span>{{label}}</span></button>
                       <div class="pf1-stat-ability-main">
                         <span class="pf1-stat-ability-mod" title="Модификатор"><small>Мод.</small><b>{{signed mod}}</b></span>
@@ -219,7 +246,7 @@
                   <h4>Передвижение и размер</h4>
                   <div class="pf1-stat-speed-grid">
                     {{#each statistics.speeds}}
-                      <label class="pf1-stat-speed-card"><span><i class="fas {{icon}}"></i>{{label}}</span><input class="pf1-stat-field" data-path="{{path}}" data-type="number" value="{{base}}" {{#unless ../statistics.editable}}disabled{{/unless}}><em>итог {{total}} фт</em></label>
+                      <label class="pf1-stat-speed-card tooltip">{{{tooltipHtml}}}<span><i class="fas {{icon}}"></i>{{label}}</span><input class="pf1-stat-field" data-path="{{path}}" data-type="number" value="{{base}}" {{#unless ../statistics.editable}}disabled{{/unless}}><em>итог {{total}} фт</em></label>
                     {{/each}}
                   </div>
                   <div class="pf1-stat-movement-details">
@@ -232,28 +259,28 @@
                   <h4>Защита и проверки</h4>
                   <div class="pf1-stat-defense-top">
                     <section class="pf1-ac-group pf1-stat-ac-shields">
-                      <div class="pf1-ac"><span>КБ</span><strong>{{statistics.ac.normal}}</strong></div>
-                      <div class="pf1-ac"><span>Касание</span><strong>{{statistics.ac.touch}}</strong></div>
-                      <div class="pf1-ac"><span>Врасплох</span><strong>{{statistics.ac.flatFooted}}</strong></div>
+                      <div class="pf1-ac tooltip">{{{statistics.ac.normalTooltipHtml}}}<span>КБ</span><strong>{{statistics.ac.normal}}</strong></div>
+                      <div class="pf1-ac tooltip">{{{statistics.ac.touchTooltipHtml}}}<span>Касание</span><strong>{{statistics.ac.touch}}</strong></div>
+                      <div class="pf1-ac tooltip">{{{statistics.ac.flatFootedTooltipHtml}}}<span>Врасплох</span><strong>{{statistics.ac.flatFooted}}</strong></div>
                     </section>
                     <div class="pf1-stat-save-cards">
                       <article class="pf1-stat-save-card">
-                      <button type="button" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="fort" data-bonus="{{statistics.saves.fort.total}}" {{#unless statistics.rollable}}disabled{{/unless}}><span><i class="fas fa-shield-alt"></i> Стойкость</span><b>{{signed statistics.saves.fort.total}}</b></button>
+                      <button type="button" class="tooltip" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="fort" data-bonus="{{statistics.saves.fort.total}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.saves.fort.tooltipHtml}}}<span><i class="fas fa-shield-alt"></i> Стойкость</span><b>{{signed statistics.saves.fort.total}}</b></button>
                         <label><span>Бонус</span><input class="pf1-stat-field" data-path="system.attributes.savingThrows.fort.base" data-type="number" value="{{statistics.saves.fort.base}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
                       </article>
                       <article class="pf1-stat-save-card">
-                      <button type="button" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="ref" data-bonus="{{statistics.saves.ref.total}}" {{#unless statistics.rollable}}disabled{{/unless}}><span><i class="fas fa-running"></i> Реакция</span><b>{{signed statistics.saves.ref.total}}</b></button>
+                      <button type="button" class="tooltip" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="ref" data-bonus="{{statistics.saves.ref.total}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.saves.ref.tooltipHtml}}}<span><i class="fas fa-running"></i> Реакция</span><b>{{signed statistics.saves.ref.total}}</b></button>
                         <label><span>Бонус</span><input class="pf1-stat-field" data-path="system.attributes.savingThrows.ref.base" data-type="number" value="{{statistics.saves.ref.base}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
                       </article>
                       <article class="pf1-stat-save-card">
-                      <button type="button" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="will" data-bonus="{{statistics.saves.will.total}}" {{#unless statistics.rollable}}disabled{{/unless}}><span><i class="fas fa-brain"></i> Воля</span><b>{{signed statistics.saves.will.total}}</b></button>
+                      <button type="button" class="tooltip" data-action="roll-saving-throw" data-actor-id="{{id}}" data-save="will" data-bonus="{{statistics.saves.will.total}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.saves.will.tooltipHtml}}}<span><i class="fas fa-brain"></i> Воля</span><b>{{signed statistics.saves.will.total}}</b></button>
                         <label><span>Бонус</span><input class="pf1-stat-field" data-path="system.attributes.savingThrows.will.base" data-type="number" value="{{statistics.saves.will.base}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
                       </article>
                     </div>
                   </div>
                   <div class="pf1-stat-form-grid pf1-stat-defense-fields">
                     <article class="pf1-stat-initiative-card">
-                      <button type="button" class="pf1-stat-summary-roll" data-action="roll-initiative" data-actor-id="{{id}}" data-bonus="{{statistics.initiative.total}}" title="Бросить инициативу" {{#unless statistics.rollable}}disabled{{/unless}}><small><i class="fas fa-bolt"></i> Инициатива</small><b>{{signed statistics.initiative.total}}</b></button>
+                      <button type="button" class="pf1-stat-summary-roll tooltip" data-action="roll-initiative" data-actor-id="{{id}}" data-bonus="{{statistics.initiative.total}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.initiative.tooltipHtml}}}<small><i class="fas fa-bolt"></i> Инициатива</small><b>{{signed statistics.initiative.total}}</b></button>
                       <label><span>Бонус Инициативы</span><input class="pf1-stat-field" data-path="system.attributes.init.value" data-type="number" value="{{statistics.initiative.value}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
                     </article>
                     <label><span>Естественная броня</span><input class="pf1-stat-field" data-path="system.attributes.naturalAC" data-type="number" value="{{statistics.naturalAC}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
@@ -263,11 +290,11 @@
                     <span class="pf1-stat-defense-output"><small>Штраф брони</small><b>{{statistics.armorCheckPenalty}}</b></span>
                   </div>
                   <div class="pf1-stat-combat-checks">
-                    <span><small>БМА</small><b>{{signed statistics.combat.bab}}</b></span>
-                    <span><small>ЗБМ</small><b>{{statistics.combat.cmd}}</b></span>
-                    <button type="button" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="cmb" data-bonus="{{statistics.combat.cmb}}" title="Бросить МБМ" {{#unless statistics.rollable}}disabled{{/unless}}><small>МБМ</small><b>{{signed statistics.combat.cmb}}</b></button>
-                    <button type="button" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="melee" data-bonus="{{statistics.combat.melee}}" title="Бросить атаку ближнего боя" {{#unless statistics.rollable}}disabled{{/unless}}><small>Ближний бой</small><b>{{signed statistics.combat.melee}}</b></button>
-                    <button type="button" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="ranged" data-bonus="{{statistics.combat.ranged}}" title="Бросить дистанционную атаку" {{#unless statistics.rollable}}disabled{{/unless}}><small>Дистанционный бой</small><b>{{signed statistics.combat.ranged}}</b></button>
+                    <span class="tooltip">{{{statistics.combat.babTooltipHtml}}}<small>БМА</small><b>{{signed statistics.combat.bab}}</b></span>
+                    <span class="tooltip">{{{statistics.combat.cmdTooltipHtml}}}<small>ЗБМ</small><b>{{statistics.combat.cmd}}</b></span>
+                    <button type="button" class="tooltip" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="cmb" data-bonus="{{statistics.combat.cmb}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.combat.cmbTooltipHtml}}}<small>МБМ</small><b>{{signed statistics.combat.cmb}}</b></button>
+                    <button type="button" class="tooltip" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="melee" data-bonus="{{statistics.combat.melee}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.combat.meleeTooltipHtml}}}<small>Ближний бой</small><b>{{signed statistics.combat.melee}}</b></button>
+                    <button type="button" class="tooltip" data-action="roll-combat-check" data-actor-id="{{id}}" data-check="ranged" data-bonus="{{statistics.combat.ranged}}" {{#unless statistics.rollable}}disabled{{/unless}}>{{{statistics.combat.rangedTooltipHtml}}}<small>Дистанционный бой</small><b>{{signed statistics.combat.ranged}}</b></button>
                   </div>
               </section>
 
@@ -277,6 +304,13 @@
                   <label><span><i class="fas fa-heartbeat"></i> Быстрое лечение</span><input class="pf1-stat-field" data-path="system.traits.fastHealing" data-type="string" data-empty-zero="true" value="{{statistics.fastHealing}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
                   <label><span><i class="fas fa-sync-alt"></i> Регенерация</span><input class="pf1-stat-field" data-path="system.traits.regen" data-type="string" data-empty-zero="true" value="{{statistics.regeneration}}" {{#unless statistics.editable}}disabled{{/unless}}></label>
                 </div>
+                <section class="pf1-stat-social-defense">
+                  <h5><i class="fas fa-user-shield"></i> Социальная защита</h5>
+                  <div>
+                    <span class="tooltip">{{{statistics.socialDefense.demoralize.tooltipHtml}}}<small><i class="fas fa-comment-slash"></i> Сложность Деморализации</small><b>{{statistics.socialDefense.demoralize.total}}</b></span>
+                    <span class="tooltip">{{{statistics.socialDefense.feint.tooltipHtml}}}<small><i class="fas fa-theater-masks"></i> Сложность Финта</small><b>{{statistics.socialDefense.feint.total}}</b></span>
+                  </div>
+                </section>
                 <div class="pf1-stat-trait-groups">
                   {{#each statistics.traitGroups}}
                     <section class="pf1-stat-trait-group" data-trait-group="{{id}}">
