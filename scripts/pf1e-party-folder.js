@@ -55,7 +55,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.0.6";
+const MODULE_VERSION_LABEL = "v2.0.7";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -3771,8 +3771,12 @@ async function postFastHealingTurnReminder(combat) {
       <button type="button" data-action="apply-party-fast-healing" data-actor-id="${actor.id}" data-amount="${amount}" title="Применить быстрое лечение"><i class="fas fa-plus"></i> Восстановить ${amount} ПЗ</button>
     </section>`;
   const compatibilityRoll = await new Roll("0").roll({ async: true });
+  const recipients = [...(game.users ?? [])]
+    .filter(user => user.isGM || actor.testUserPermission?.(user, "OWNER"))
+    .map(user => user.id);
   await ChatMessage.create({
     speaker: ChatMessage.getSpeaker({ actor }),
+    whisper: recipients,
     content,
     rolls: [compatibilityRoll],
     flags: {
