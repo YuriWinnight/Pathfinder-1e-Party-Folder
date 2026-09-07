@@ -12443,6 +12443,39 @@ body > .pf1-party-floating-stat-tooltip .inline-roll {
   color: #fff;
 }
 
+.window-app.pf1-party-folder .pf1-party-hero .pf1-party-img-edit {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  line-height: 1;
+}
+
+.window-app.pf1-party-folder .pf1-party-hero .pf1-party-img-edit > i {
+  display: block;
+  width: auto;
+  margin: 0;
+  line-height: 1;
+  transform: none;
+}
+
+.window-app.pf1-party-folder .pf1-member-token-drag,
+.window-app.pf1-party-folder .pf1-party-members-drag {
+  cursor: grab;
+}
+
+.window-app.pf1-party-folder .pf1-party-members-drag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px dashed currentColor;
+  border-radius: 3px;
+  text-align: center;
+}
+
 .window-app.pf1-party-folder .pf1-theme-bg-dark .pf1-stat-social-defense {
   border-color: rgba(135, 152, 222, .55);
   border-left-color: #8798de;

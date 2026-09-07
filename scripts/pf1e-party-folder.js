@@ -55,7 +55,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.0.7";
+const MODULE_VERSION_LABEL = "v2.0.9";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -804,12 +804,9 @@ async function flushHeroPointSave(partyActor) {
   const pending = pendingHeroPointUpdates.get(partyActor.id);
   if (!pending) return;
   const nextHeroPoints = mergeObject(getStoredHeroPoints(partyActor), pending, { inplace: false });
-  const scrollSnapshots = captureOpenPartySheetScrolls();
   await partyActor.update({ [`flags.${MODULE_ID}.${HERO_POINTS_FLAG}`]: nextHeroPoints }, { render: false, diff: true });
   if (pendingHeroPointUpdates.get(partyActor.id) === pending) pendingHeroPointUpdates.delete(partyActor.id);
   else scheduleHeroPointSave(partyActor);
-  schedulePublicPartySnapshotRefresh(partyActor);
-  restoreOpenPartySheetScrolls(scrollSnapshots);
 }
 
 async function changeActorHeroPoints(partyActor, actorId, delta) {
@@ -2017,11 +2014,19 @@ function getItemWeightEach(itemData) {
 function getItemPriceGpEach(itemData) {
   const legacyPrice = isDocumentLike(itemData) ? undefined : gprop(itemData, "data.data.price");
   const raw = gprop(itemData, "system.price") ?? gprop(itemData, "system.price.value") ?? legacyPrice ?? 0;
-  return parsePriceToGp(raw);
+  const uses = itemData?.system?.uses;
+  return parsePriceToGp(raw) + Math.max(0, toNumber(uses?.pricePerUse, 0)) * Math.max(0, toNumber(uses?.value, 0));
 }
 
 function setItemPriceGpEach(itemData, priceGp) {
   const value = Math.max(0, toNumber(priceGp, 0));
+  const uses = itemData?.system?.uses;
+  if (toNumber(uses?.pricePerUse, 0) > 0 && toNumber(uses?.value, 0) > 0) {
+    const basePrice = Math.min(value, parsePriceToGp(itemData.system.price));
+    sprop(itemData, "system.price", basePrice);
+    sprop(itemData, "system.uses.pricePerUse", (value - basePrice) / uses.value);
+    return itemData;
+  }
   if (has(itemData, "system.price.value")) sprop(itemData, "system.price.value", value);
   else if (!isDocumentLike(itemData) && has(itemData, "data.data.price")) sprop(itemData, "data.data.price", value);
   else sprop(itemData, "system.price", value);
@@ -2295,6 +2300,10 @@ function applyRuImprovementsIdentificationState(source, identified, { curseIdent
   }
 
   sprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_CURSE_FLAG}.identified`, false);
+  if (!ruImprovementsUnknownIconsEnabled()) {
+    if (stored?.originalImg) source.img = stored.originalImg;
+    return source;
+  }
   const { category, img } = getRuImprovementsUnknownIcon(source);
   const currentImg = source.img || "icons/svg/item-bag.svg";
   const originalImg = !isRuImprovementsUnknownIcon(currentImg)
@@ -2305,9 +2314,39 @@ function applyRuImprovementsIdentificationState(source, identified, { curseIdent
   return source;
 }
 
+function ruImprovementsUnknownIconsEnabled() {
+  const module = activeRuImprovementsModule();
+  if (!module) return false;
+  if (typeof module.api?.areUnknownItemIconsEnabled === "function") return module.api.areUnknownItemIconsEnabled();
+  try {
+    return game.settings.get(RU_IMPROVEMENTS_ID, "replaceUnidentifiedItemIcons") !== false;
+  } catch (_error) {
+    return true;
+  }
+}
+
 function getRuImprovementsIdentificationImage(source) {
-  if (!activeRuImprovementsModule() || isItemIdentified(source)) return source?.img || "icons/svg/item-bag.svg";
+  if (!activeRuImprovementsModule()) return source?.img || "icons/svg/item-bag.svg";
+  if (isItemIdentified(source) || !ruImprovementsUnknownIconsEnabled()) {
+    return gprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_UNKNOWN_ICON_FLAG}.originalImg`)
+      || source?.img || "icons/svg/item-bag.svg";
+  }
   return getRuImprovementsUnknownIcon(source).img;
+}
+
+function synchronizeStashSourceImages(source) {
+  if (!source || typeof source !== "object") return source;
+  if (ruImprovementsUnknownIconsEnabled() && !isItemIdentified(source)
+      && source.img && !isRuImprovementsUnknownIcon(source.img)
+      && !gprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_UNKNOWN_ICON_FLAG}.originalImg`)) {
+    sprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_UNKNOWN_ICON_FLAG}`, {
+      originalImg: source.img,
+      category: getRuImprovementsUnknownIconCategory(source)
+    });
+  }
+  source.img = getRuImprovementsIdentificationImage(source);
+  for (const child of arrayFromMaybeObject(source.system?.inventoryItems)) synchronizeStashSourceImages(child);
+  return source;
 }
 
 function getItemIdentificationView(source) {
@@ -2548,7 +2587,7 @@ function getStashItemView(stashItem) {
 function getStashItemSource(stashItem) {
   const source = deepClone(stashItem?.stashId && stashItem?.data ? stashItem.data : stashItem ?? {});
   ensureItemSourceBasics(source, stashItem);
-  return source;
+  return synchronizeStashSourceImages(source);
 }
 
 function firstNonEmptyString(...values) {
@@ -3116,7 +3155,7 @@ function prepareStashItemSourceForPF1Sheet(stashItem) {
   if (typeof source.system.description === "string") source.system.description = { value: source.system.description };
   source.system.quantity = getItemQuantity(source);
   source.system.weight = getItemWeightEach(source);
-  source.system.price = getItemPriceGpEach(source);
+  source.system.price = parsePriceToGp(source.system.price);
   source.system.actions = arrayFromMaybeObject(source.system.actions);
   source.system.changes = arrayFromMaybeObject(source.system.changes);
   source.system.contextNotes = arrayFromMaybeObject(source.system.contextNotes);
@@ -3628,6 +3667,7 @@ async function performPartyQuickRoll(partyActor, kind, checkId, rollMode = "publ
     rows.push({ actor, total: nativeResult.total });
   }
   if (!rows.length) return ui.notifications.warn("PF1 не смог выполнить ни одного броска.");
+  if (getPartyMetagameSettings(partyActor).hideQuickRollSummary) return rows;
   return postPartyQuickRollSummary(partyActor, definition, rows, rollMode);
 }
 
@@ -4268,7 +4308,10 @@ async function createSystemStyleSpellConsumableDialog(spellSource) {
     return source;
   };
   const createConsumable = async (root, type) => {
-    const consumable = await SpellClass.toConsumable(getFormData(root), type);
+    const converter = globalThis.pf1?.utils?.createConsumableSpell;
+    const consumable = typeof converter === "function"
+      ? await converter(getFormData(root), type)
+      : await SpellClass.toConsumable(getFormData(root), type);
     if (consumable?._id) delete consumable._id;
     return consumable;
   };
@@ -4388,6 +4431,7 @@ function defaultMetagameSettings() {
   return {
     showAllPartyStatistics: false,
     autoIdentifyItems: false,
+    hideQuickRollSummary: true,
     hideIdentificationDC: true,
     identifyOnlyAsSelf: false,
     restrictStatisticRollsToOwned: false
@@ -4454,6 +4498,7 @@ function metagameDialog(current = {}) {
       <label><span><b>Скрывать СЛ опознания</b><em>Игроки не видят сложность опознания в таблицах и сообщениях чата. Мастеру СЛ видна всегда.</em></span><input type="checkbox" name="hideIdentificationDC" ${checked("hideIdentificationDC")}></label>
       <label><span><b>Опознание только за себя</b><em>Игрок выполняет броски опознания только назначенным ему персонажем. Мастер по-прежнему может выбрать любого участника партии.</em></span><input type="checkbox" name="identifyOnlyAsSelf" ${checked("identifyOnlyAsSelf")}></label>
       <label><span><b>Автоматически опознавать предметы</b><em>Успешный бросок Колдовства в окне опознания сразу меняет предмет на опознанный.</em></span><input type="checkbox" name="autoIdentifyItems" ${checked("autoIdentifyItems")}></label>
+      <label><span><b>Скрывать общую сводку быстрых бросков</b><em>В чате остаются отдельные броски каждого персонажа, без общей сводки и среднего значения.</em></span><input type="checkbox" name="hideQuickRollSummary" ${checked("hideQuickRollSummary")}></label>
     </form>`;
   return dialogPromise({
     title: "Метаигровая информация",
@@ -4552,7 +4597,8 @@ class PF1PartyActorSheet extends ActorSheet {
       const actor = game.actors.get(member.id);
       const editable = Boolean(actor && (actor.isOwner || actor.testUserPermission?.(game.user, "OWNER")));
       const rollable = canRollPartyActor(this.actor, actor);
-      return { ...member, rollable, statistics: { ...member.statistics, editable, rollable } };
+      // Hero points are live party flags, even when member statistics use a public snapshot.
+      return { ...member, heroPoints: getHeroPointState(heroPoints, member.id), rollable, statistics: { ...member.statistics, editable, rollable } };
     });
     const statisticsMembers = game.user.isGM || metagame.showAllPartyStatistics || metagame.restrictStatisticRollsToOwned
       ? sheetMembers
@@ -4630,6 +4676,19 @@ class PF1PartyActorSheet extends ActorSheet {
     html.on("mouseleave.pf1PartyNativeTooltip", ".tooltip", hideFloatingStatTooltip);
 
     html.find(".pf1-party-token-drag").on("dragstart", event => this._onPartyTokenDragStart(event));
+    html.find(".pf1-member-token-drag, .pf1-party-members-drag").on("dragstart", event => {
+      const nativeEvent = event.originalEvent ?? event;
+      if (!nativeEvent.dataTransfer) return;
+      const actorId = event.currentTarget.dataset.actorId;
+      const actor = actorId ? game.actors.get(actorId) : null;
+      if (actorId && !actor) return;
+      event.stopPropagation();
+      const data = actor
+        ? actor.toDragData()
+        : { type: "PF1PartyMembers", partyActorId: this.actor.id };
+      nativeEvent.dataTransfer.effectAllowed = "copy";
+      nativeEvent.dataTransfer.setData("text/plain", JSON.stringify(data));
+    });
 
     html.find(".pf1-party-item").on("dragstart", event => this._onStashItemDragStart(event));
     html.find(".pf1-stash-container-item").on("dragstart", event => this._onStashContainerItemDragStart(event));
@@ -4943,9 +5002,7 @@ class PF1PartyActorSheet extends ActorSheet {
 
   async _adjustHeroPoints(actorId, delta) {
     if (!actorId) return;
-    const scrollSnapshots = captureOpenPartySheetScrolls();
     await changeActorHeroPoints(this.actor, actorId, delta);
-    restoreOpenPartySheetScrolls(scrollSnapshots);
   }
 
   async _onCurrencyInput(event) {
@@ -6088,6 +6145,70 @@ async function createPartyTokenOnCanvas(data, event = null) {
   return true;
 }
 
+function placePartyMemberTokens(tokens, position, scene) {
+  const size = Math.max(1, toNumber(scene.grid?.size, 100));
+  const bounds = scene.dimensions?.sceneRect;
+  const rectangle = token => ({
+    x: token.x, y: token.y,
+    width: Math.max(0.5, toNumber(token.width, 1)) * size,
+    height: Math.max(0.5, toNumber(token.height, 1)) * size
+  });
+  const occupied = Array.from(scene.tokens ?? [], rectangle);
+  const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x
+    && a.y < b.y + b.height && a.y + a.height > b.y;
+  const snap = point => scene.grid?.type && canvas.grid?.getSnappedPosition
+    ? canvas.grid.getSnappedPosition(point.x, point.y, 1) : point;
+  const origin = snap(position);
+  for (const token of tokens) {
+    let placed = false;
+    // Search nearby rings; reserve each footprint before placing the next token.
+    for (let radius = 0; radius <= 50 && !placed; radius++) {
+      for (let dy = -radius; dy <= radius && !placed; dy++) {
+        for (let dx = -radius; dx <= radius && !placed; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const point = snap({ x: origin.x + dx * size, y: origin.y + dy * size });
+          const rect = rectangle({ ...token, ...point });
+          if (bounds && (rect.x < bounds.x || rect.y < bounds.y
+              || rect.x + rect.width > bounds.x + bounds.width
+              || rect.y + rect.height > bounds.y + bounds.height)) continue;
+          if (occupied.some(other => overlaps(rect, other))) continue;
+          Object.assign(token, point);
+          occupied.push(rect);
+          placed = true;
+        }
+      }
+    }
+    if (!placed) throw new Error("Рядом с точкой сброса недостаточно места для всей партии.");
+  }
+  return tokens;
+}
+
+async function createPartyMembersOnCanvas(data, event = null) {
+  const scene = canvas?.scene;
+  const party = game.actors.get(data.partyActorId);
+  if (!scene || !party?.getFlag(MODULE_ID, PARTY_FLAG)) return false;
+  const TokenClass = getDocumentClass("Token");
+  if (!TokenClass.canUserCreate(game.user)) {
+    ui.notifications.warn("У вас нет разрешения создавать токены на сцене.");
+    return false;
+  }
+  const members = getPartyMembers(party, { ignorePermissions: true });
+  const allowed = members.filter(actor => game.user.isGM || actor.testUserPermission(game.user, "OWNER"));
+  if (allowed.length !== members.length) ui.notifications.warn("Будут размещены только персонажи, которыми вы владеете.");
+  if (!allowed.length) return false;
+  const position = getCanvasDropPosition(event, data);
+  const tokens = [];
+  for (const actor of allowed) {
+    const token = (await actor.getTokenDocument()).toObject();
+    delete token._id;
+    tokens.push(token);
+  }
+  if (canvas.scene !== scene) return false;
+  placePartyMemberTokens(tokens, position, scene);
+  await scene.createEmbeddedDocuments("Token", tokens);
+  return true;
+}
+
 function hidePartyActorRows(html) {
   const actors = getPartyActors();
   if (!actors.length) return;
@@ -6279,7 +6400,6 @@ async function useHeroPointOnChatMessage(message) {
       flags: foundry.utils.expandObject(flags).flags
     });
   }
-  await renderOpenPartySheets();
 }
 
 function actorIsInParty(actor, party = null) {
@@ -6897,12 +7017,21 @@ Hooks.on("getChatLogEntryContext", (html, options) => {
     callback: li => undoFastHealingFromMessage(getChatMessageFromContext(li))
   });
 });
-Hooks.on("dropCanvasData", async (canvas, data, event) => {
-  if (data?.type === "PF1EPartyToken") {
-    event?.preventDefault?.();
-    await createPartyTokenOnCanvas(data, event);
-    return false;
-  }
+Hooks.on("dropCanvasData", (_canvas, data, event) => {
+  const handler = data?.type === "PF1PartyMembers" ? createPartyMembersOnCanvas
+    : data?.type === "PF1EPartyToken" ? createPartyTokenOnCanvas : null;
+  if (!handler) return;
+  event?.preventDefault?.();
+  void handler(data, event).catch(error => {
+    console.warn(`${MODULE_ID} | Не удалось разместить токены партии.`, error);
+    ui.notifications.error(error.message || "Не удалось разместить токены партии.");
+  });
+  return false;
+});
+Hooks.on("updateSetting", setting => {
+  if (setting.key !== `${RU_IMPROVEMENTS_ID}.replaceUnidentifiedItemIcons`) return;
+  renderOpenPartySheets();
+  for (const party of getPartyActors()) renderOpenStashIdentificationApps(party.id);
 });
 Hooks.on("updateFolder", async (folder, changed) => {
   if (folder.type !== "Actor" || !folder.getFlag(MODULE_ID, PARTY_FOLDER_FLAG) || changed.name === undefined) return;

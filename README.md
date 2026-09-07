@@ -1,5 +1,18 @@
 # PF1e Party Folder
 
+## Changes in version 2.0.9
+
+- Update hero-point controls without resetting scroll positions or rebuilding party statistics.
+- Read current hero points from synchronized party flags when reopening a menu that uses cached public statistics.
+
+## Changes in version 2.0.8
+
+- Honor Ru Improvements' unidentified-image setting in the stash, including nested items and live setting changes.
+- Use PF1 spell conversion and include remaining charges in wand prices without changing the base price when opening a sheet.
+- Hide the quick-roll summary by default, with a party-menu setting to restore it; individual actor rolls are unchanged.
+- Drag Overview portraits to the canvas or drag the Quick Rolls party handle to place all permitted members using their prototype tokens.
+- Center the party image-picker icon inside its circular button.
+
 ## Changes in version 2.0.4
 
 - Replaced Foundry's stretched global statistic tooltip with the native PF1 actor-sheet tooltip markup and positioning.
