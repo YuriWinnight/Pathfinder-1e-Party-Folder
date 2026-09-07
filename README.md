@@ -1,5 +1,49 @@
 # PF1e Party Folder
 
+## Changes in version 2.2.3
+
+- Participant names use the prototype token name, including existing snapshot views, skill tooltips and member selection menus; blank token names fall back to the actor name.
+- Skill, language and statistic tooltip backgrounds grow with their content up to the viewport width.
+- Long names and source descriptions wrap within the background; skill bonuses retain their own aligned column.
+
+## Changes in version 2.2.2
+
+- Center and enlarge the hidden-data notice with a serif font and theme-aware text color.
+- Shift skill checks use PF1's native roll with a separately labeled Hero Point +8 term, preserving all sources, dice, context notes and chat visibility.
+- Do not spend a hero point when PF1 cancels or cannot prepare the roll; mark the resulting message to prevent a second hero-point bonus.
+
+## Changes in version 2.2.1
+
+- Player-assigned characters have full party visibility without granting editing rights; party visibility and privacy controls still apply.
+- Limited members show their portrait, HP and a hidden-data notice. Their languages, skills and knowledge checks appear in the standard Overview categories.
+- Party totals exclude hidden monetary values independently for currency and property. GM and owner views retain their available values.
+- Changing a player's assigned character refreshes open party menus.
+
+## Changes in version 2.2.0
+
+- Configure folder visibility per player, including offline players, without changing actor ownership.
+- In All, hidden folders conceal actors with no native access. Visible folders provide a Limited fallback; native Limited, Observer and Owner permissions remain authoritative.
+- Limited viewers see identity, known languages and strong skill names, without statistics, numeric bonuses or wealth. Observers see full details; Owners can edit statistics regardless of read-only party roll settings.
+- Separate property (item value plus currency) from wealth (currency only). Legacy currency/property privacy choices are read compatibly, and party-total privacy remains independent.
+- Hidden folder inheritance applies to folder buttons; it does not revoke explicit actor permissions in All.
+
+## Changes in version 2.1.1
+
+- Replace the header version line with Composition and Groups, restoring the compact three-line header.
+- Add separate per-member currency and wealth privacy checkboxes; owners and GMs retain visibility, and aggregate privacy remains independent.
+- Add subfolder visibility controls inside Composition and Groups: visible, owners only, or hidden from players. Restrictions apply to descendants and all views, including the All group and virtual display assignments.
+
+## Changes in version 2.1.0
+
+- Include characters and NPC companions from nested party folders, stopping at other party roots.
+- Configure each participant's Overview, Statistics and Stash visibility and virtual display group in Module Settings > Party Composition and Groups.
+- Optionally switch folder groups in the party menu. Members can appear in every group without moving their actor documents.
+- Hide individual participants from other players in the visibility/language settings; their owners and GMs retain visibility.
+- Add independent party-menu settings for hiding other characters' wealth and hiding party wealth totals. Shared stash amounts remain visible.
+- Filter language and skill summaries, group rolls, token drops, rest and stash recipients to the relevant displayed group.
+
+Display and privacy options affect the party menu, not Foundry document ownership. Disabling the party-total privacy option shows the sum of values visible to the viewer, excluding hidden amounts.
+
 ## Changes in version 2.0.9
 
 - Update hero-point controls without resetting scroll positions or rebuilding party statistics.

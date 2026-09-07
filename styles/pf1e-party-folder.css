@@ -12443,6 +12443,202 @@ body > .pf1-party-floating-stat-tooltip .inline-roll {
   color: #fff;
 }
 
+.pf1-member-display-form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 10px;
+  container-type: inline-size;
+}
+
+.pf1-member-display-form > p {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.pf1-member-display-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pf1-member-display-list section {
+  margin-bottom: 16px;
+}
+
+.pf1-member-display-list h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.pf1-member-display-head,
+.pf1-member-display-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(80, 80, 80, .25);
+}
+
+.pf1-member-display-head {
+  font-weight: bold;
+}
+
+.pf1-member-display-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.pf1-member-display-name img {
+  width: 36px;
+  height: 44px;
+  object-fit: contain;
+  border: 0;
+}
+
+.pf1-member-display-name span,
+.pf1-member-display-row label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pf1-member-display-name small {
+  display: block;
+  margin-top: 3px;
+}
+
+.pf1-member-display-row select {
+  width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.pf1-member-display-view-label {
+  display: none;
+}
+
+.pf1-member-display-form .sheet-footer {
+  flex: 0 0 auto;
+}
+
+@container (max-width: 650px) {
+  .pf1-member-display-head { display: none; }
+  .pf1-member-display-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pf1-member-display-name { grid-column: 1 / -1; }
+  .pf1-member-display-view-label { display: block; margin-bottom: 4px; }
+}
+
+.pf1-information-mask-private {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  gap: 5px;
+}
+
+.pf1-information-mask-private > label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pf1-folder-visibility {
+  margin: 0 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(80, 80, 80, .25);
+}
+
+.pf1-folder-visibility summary {
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.pf1-folder-access {
+  margin-top: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(80, 80, 80, .18);
+}
+
+.pf1-folder-access > label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.pf1-folder-access > label > span {
+  overflow-wrap: anywhere;
+}
+
+.pf1-folder-visibility select {
+  width: 100%;
+  min-width: 0;
+}
+
+.window-app.pf1-party-folder .is-limited .pf1-party-member-main {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+.window-app.pf1-party-folder .pf1-limited-member-info {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  padding: 12px;
+  font-family: var(--serif, Georgia, serif);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+  color: #63596d;
+}
+
+.window-app.pf1-party-folder .pf1-theme-bg-dark .pf1-limited-member-info {
+  color: #c8bfd2;
+}
+
+.window-app.pf1-party-folder .pf1-member-folder-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(128, 128, 128, .4);
+}
+
+.window-app.pf1-party-folder .pf1-member-folder-tabs button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 2px 10px;
+  font-size: 13px;
+  line-height: 24px;
+  border-radius: 3px;
+  color: inherit;
+}
+
+.window-app.pf1-party-folder .pf1-member-folder-tabs button.is-active {
+  background: #17276d;
+  color: #fff;
+}
+
+.window-app.pf1-party-folder .pf1-member-display-open {
+  display: block;
+  font: 600 var(--font-size-12)/1.15 var(--sans-serif) !important;
+  margin: 0;
+  opacity: .85;
+}
+
+.window-app.pf1-party-folder .pf1-wealth-hidden {
+  opacity: .75;
+}
+
 .window-app.pf1-party-folder .pf1-party-hero .pf1-party-img-edit {
   display: grid;
   place-items: center;
@@ -12502,4 +12698,70 @@ body > .pf1-party-floating-stat-tooltip .inline-roll {
     grid-template-columns: 1fr 1fr;
     justify-self: stretch;
   }
+}
+
+/* Size party tooltip backdrops with their content, not Foundry's 320px default. */
+:is(#tooltip, .locked-tooltip):has(.pf1-party-skill-tooltip, .pf1-skill-tooltip, .pf1-language-tooltip, .pf1-stat-bonus-tooltip),
+body > .pf1-party-floating-stat-tooltip {
+  box-sizing: border-box;
+  width: max-content !important;
+  min-width: 0 !important;
+  max-width: calc(100vw - 16px) !important;
+  height: auto !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-party-skill-tooltip {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content !important;
+  gap: 2px .55rem !important;
+  width: 100%;
+  min-width: 0;
+  white-space: normal !important;
+  text-align: left;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-party-skill-tooltip div {
+  display: contents !important;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-party-skill-tooltip span {
+  min-width: 0 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-party-skill-tooltip b {
+  min-width: 0 !important;
+  justify-self: end !important;
+  align-self: start;
+  white-space: nowrap;
+  text-align: right;
+}
+
+:is(#tooltip, .locked-tooltip) :is(.pf1-language-tooltip, .pf1-skill-tooltip) {
+  min-width: 0;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  text-align: left !important;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-language-tooltip {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .12rem;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-stat-bonus-tooltip,
+body > .pf1-party-floating-stat-tooltip {
+  grid-template-columns: minmax(0, 1fr) max-content minmax(0, max-content) !important;
+}
+
+:is(#tooltip, .locked-tooltip) .pf1-stat-bonus-tooltip :is(.span1, .span2, .span3, .tooltipcontent-context),
+body > .pf1-party-floating-stat-tooltip :is(.span1, .span2, .span3, .tooltipcontent-context) {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

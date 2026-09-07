@@ -11,6 +11,9 @@ const PUBLIC_SNAPSHOT_FLAG = "publicSnapshot";
 const PUBLIC_SNAPSHOT_SETTING = "publicPartySnapshot";
 const HERO_POINTS_FLAG = "heroPoints";
 const MEMBER_INFORMATION_MASKS_SETTING = "memberInformationMasks";
+const MEMBER_DISPLAY_SETTING = "memberDisplay";
+const FOLDER_VISIBILITY_SETTING = "folderVisibility";
+const MEMBER_VIEWS = { overview: "Обзор", statistics: "Статистика", stash: "Тайник" };
 const METAGAME_ACCESS_ROLE_SETTING = "metagameAccessRole";
 const RU_IMPROVEMENTS_ID = "pf1e-ru-improvements";
 const RU_IMPROVEMENTS_SCROLL_PICKER_SETTING = "enableScrollIconPicker";
@@ -55,7 +58,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.0.9";
+const MODULE_VERSION_LABEL = "v2.2.3";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -598,7 +601,117 @@ function getPartyFolder(partyOrKey = PRIMARY_PARTY_KEY) {
 
 function getPartyForMember(actor) {
   if (!actor) return null;
-  return getPartyActors().find(party => getPartyFolder(party)?.id === actor.folder?.id) ?? null;
+  let folder = resolveActorFolder(actor.folder);
+  const visited = new Set();
+  while (folder && !visited.has(folder.id)) {
+    visited.add(folder.id);
+    if (folder.getFlag?.(MODULE_ID, PARTY_FOLDER_FLAG)) return getPartyActor(getPartyKey(folder));
+    folder = resolveActorFolder(folder.folder);
+  }
+  return null;
+}
+
+function resolveActorFolder(folder) {
+  return typeof folder === "string" ? game.folders?.get(folder) : folder;
+}
+
+function getPartyDisplayFolders(partyActor) {
+  const root = getPartyFolder(partyActor);
+  if (!root) return [];
+  const rows = [];
+  const visit = (folder, label, visited) => {
+    if (visited.has(folder.id)) return;
+    visited.add(folder.id);
+    rows.push({ id: folder.id, label });
+    const children = [...(game.folders ?? [])].filter(child => child.type === "Actor"
+      && resolveActorFolder(child.folder)?.id === folder.id && !child.getFlag?.(MODULE_ID, PARTY_FOLDER_FLAG))
+      .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.name.localeCompare(b.name, game.i18n.lang));
+    for (const child of children) visit(child, folder === root ? child.name : `${label} / ${child.name}`, visited);
+  };
+  visit(root, root.name, new Set());
+  return rows;
+}
+
+function getMemberDisplayRules(partyActor) {
+  return game.settings.get(MODULE_ID, MEMBER_DISPLAY_SETTING)?.[partyActor?.id] ?? {};
+}
+
+function canSeeMemberPrivateInformation(memberId, user = game.user) {
+  return getActorUserAccess(game.actors?.get(memberId), user) >= 3;
+}
+
+function getPartyMemberName(actor, fallback = "") {
+  return String(gprop(actor, "prototypeToken.name") ?? "").trim() || actor?.name || fallback;
+}
+
+function getActorUserAccess(actor, user = game.user) {
+  if (user?.isGM) return 3;
+  if (!actor) return 0;
+  if (actor.ownership) {
+    const assigned = actor.ownership[user.id];
+    return Math.max(0, Math.min(3, toNumber(assigned >= 0 ? assigned : actor.ownership.default, 0)));
+  }
+  for (const [level, name] of [[3, "OWNER"], [2, "OBSERVER"], [1, "LIMITED"]]) {
+    if (actor.testUserPermission?.(user, name)) return level;
+  }
+  return 0;
+}
+
+function normalizeFolderVisibilityRule(value) {
+  if (typeof value === "string") return { default: value === "visible" ? "visible" : "hidden", users: {} };
+  return { default: value?.default === "hidden" ? "hidden" : "visible", users: value?.users ?? {} };
+}
+
+function getPartyFolderVisibility(partyActor, folderId, user = game.user) {
+  if (user.isGM) return "visible";
+  const rules = game.settings.get(MODULE_ID, FOLDER_VISIBILITY_SETTING)?.[partyActor?.id] ?? {};
+  const rootId = getPartyFolder(partyActor)?.id;
+  let folder = resolveActorFolder(folderId);
+  const visited = new Set();
+  while (folder && !visited.has(folder.id)) {
+    visited.add(folder.id);
+    const rule = normalizeFolderVisibilityRule(rules[folder.id]);
+    const personal = rule.users[user.id];
+    const mode = ["visible", "hidden"].includes(personal) ? personal : rule.default;
+    if (mode === "hidden") return "hidden";
+    if (folder.id === rootId) break;
+    folder = resolveActorFolder(folder.folder);
+  }
+  return "visible";
+}
+
+function getPartyMemberAccess(partyActor, member, user = game.user, displayFolderId = null) {
+  if (user.isGM) return 3;
+  const actor = game.actors?.get(member.id);
+  const nativeAccess = getActorUserAccess(actor, user);
+  // Assigned player characters are public party members, without granting ownership.
+  const assigned = [...(game.users ?? [])].some(player => !player.isGM && player.character?.id === member.id);
+  if (assigned) return Math.max(2, nativeAccess);
+  if (nativeAccess > 0) return nativeAccess;
+  const physicalFolderId = resolveActorFolder(actor?.folder)?.id ?? member.folderId ?? getPartyFolder(partyActor)?.id;
+  return getPartyFolderVisibility(partyActor, physicalFolderId, user) === "visible"
+    && getPartyFolderVisibility(partyActor, displayFolderId ?? physicalFolderId, user) === "visible" ? 1 : 0;
+}
+
+function memberAppearsInView(partyActor, member, view, { folderId = "all", user = game.user } = {}) {
+  const actor = game.actors?.get(member.id);
+  const mask = normalizeInformationMaskEntry(getMemberInformationMasks()[member.id]);
+  if (mask.hideFromOthers && !canSeeMemberPrivateInformation(member.id, user)) return false;
+  const rule = getMemberDisplayRules(partyActor)[member.id]?.[view] ?? "folder";
+  if (rule === "hidden") return false;
+  const folders = getPartyDisplayFolders(partyActor);
+  const physicalFolderId = resolveActorFolder(actor?.folder)?.id ?? member.folderId ?? getPartyFolder(partyActor)?.id;
+  const displayFolderId = folders.some(folder => folder.id === rule) ? rule : physicalFolderId;
+  if (getPartyMemberAccess(partyActor, member, user, displayFolderId) === 0) return false;
+  if (view === "statistics" && getPartyMemberAccess(partyActor, member, user, displayFolderId) < 2) return false;
+  if (folderId !== "all" && getPartyFolderVisibility(partyActor, folderId, user) === "hidden") return false;
+  if (!getPartyMetagameSettings(partyActor).groupMembersByFolder || folderId === "all" || rule === "*") return true;
+  return displayFolderId === folderId;
+}
+
+function getPartyViewMembers(partyActor, view, options = {}) {
+  return getPartyMembers(partyActor, { ignorePermissions: true })
+    .filter(member => memberAppearsInView(partyActor, member, view, options));
 }
 
 async function ensurePartyFolder(name = null, partyOrKey = PRIMARY_PARTY_KEY) {
@@ -702,8 +815,9 @@ function isMemberCandidate(actor) {
 function getPartyMembers(partyActor, { ignorePermissions = false } = {}) {
   const folder = getPartyFolder(partyActor);
   if (!folder) return [];
+  const folderIds = new Set(getPartyDisplayFolders(partyActor).map(entry => entry.id));
   return [...(game.actors ?? [])].filter(actor =>
-    actor.folder?.id === folder.id
+    folderIds.has(resolveActorFolder(actor.folder)?.id)
     && isMemberCandidate(actor)
     && (ignorePermissions || actor.testUserPermission(game.user, "OBSERVER"))
   );
@@ -717,7 +831,7 @@ async function addMember(partyActor, actorId) {
   await partyActor.setFlag(MODULE_ID, MEMBERS_FLAG, [...ids]);
   const folder = await ensurePartyFolder(partyActor.name, partyActor);
   if (folder && game.user.isGM && actor.folder?.id !== folder.id) await actor.update({ folder: folder.id });
-  ui.notifications.info(`${actor.name} добавлен(а) в партию.`);
+  ui.notifications.info(`${getPartyMemberName(actor)} добавлен(а) в партию.`);
 }
 
 async function removeMember(partyActor, actorId) {
@@ -726,7 +840,7 @@ async function removeMember(partyActor, actorId) {
   await partyActor.setFlag(MODULE_ID, MEMBERS_FLAG, [...ids]);
   const actor = game.actors.get(actorId);
   const folder = getPartyFolder(partyActor);
-  if (actor && folder && game.user.isGM && actor.folder?.id === folder.id) await actor.update({ folder: null });
+  if (actor && folder && game.user.isGM && getPartyForMember(actor)?.id === partyActor.id) await actor.update({ folder: null });
 }
 
 function getStoredHeroPoints(partyActor) {
@@ -819,7 +933,7 @@ async function spendHeroPoint(partyActor, actorId) {
   const heroPoints = getHeroPoints(partyActor);
   const current = getHeroPointValue(heroPoints, actorId);
   if (current <= 0) {
-    const actorName = game.actors.get(actorId)?.name || "персонажа";
+    const actorName = getPartyMemberName(game.actors.get(actorId), "персонажа");
     ui.notifications.warn(`У ${actorName} нет геройских очков.`);
     return false;
   }
@@ -1764,7 +1878,7 @@ function collectSkills(actor) {
     const baseLabel = getSkillLabel(id, skill);
     const label = parentLabel && !baseLabel.includes(parentLabel) ? `${parentLabel}: ${baseLabel}` : baseLabel;
     if (Number.isFinite(mod)) {
-      result.push({ id, label: formatSkillLabel(label), bonus: mod, ranks, actorId: actor.id, actorName: actor.name });
+      result.push({ id, label: formatSkillLabel(label), bonus: mod, ranks, actorId: actor.id, actorName: getPartyMemberName(actor) });
     }
 
     const subSkills = skill.subSkills || skill.subskills || skill.children;
@@ -1825,13 +1939,13 @@ function buildPartySkillSummaries(members) {
           label: skill.label,
           best: -Infinity,
           bestActorId: actor.id,
-          bestActorName: actor.name,
+          bestActorName: getPartyMemberName(actor),
           invested: false,
           members: []
         };
       entry.members.push({
         actorId: actor.id,
-        actorName: actor.name,
+        actorName: getPartyMemberName(actor),
         bonus: skill.bonus,
         ranks: skill.ranks
       });
@@ -1839,7 +1953,7 @@ function buildPartySkillSummaries(members) {
       if (skill.bonus > entry.best) {
         entry.best = skill.bonus;
         entry.bestActorId = actor.id;
-        entry.bestActorName = actor.name;
+        entry.bestActorName = getPartyMemberName(actor);
       }
       byId.set(skill.id, entry);
     }
@@ -2147,6 +2261,7 @@ function getActorWealth(actor) {
   const itemsGp = getActorItemValueGp(actor);
   return {
     coinGp: fmtNumber(coinGp),
+    itemsGp: fmtNumber(itemsGp),
     wealthGp: fmtNumber(coinGp + itemsGp),
     weight: fmtNumber(getActorCarriedWeight(actor))
   };
@@ -2513,6 +2628,7 @@ async function handlePartyFolderSocket(payload) {
     const actor = game.actors?.get(payload.actorId);
     const members = getPartyMembers(partyActor, { ignorePermissions: true });
     if (!actor || !members.some(member => member.id === actor.id)) return;
+    if (!memberAppearsInView(partyActor, actor, "stash", { user: requester })) return;
     const metagame = getPartyMetagameSettings(partyActor);
     if (metagame.identifyOnlyAsSelf && !requester.isGM && requester.character?.id !== actor.id) return;
     const available = buildStashIdentificationData(getStash(partyActor)).unidentified;
@@ -2533,7 +2649,7 @@ async function handlePartyFolderSocket(payload) {
     const definition = getQuickRollDefinition(kind, String(payload.checkId ?? ""));
     if (!definition) return;
     const rollMode = payload.rollMode === "blindroll" ? "blindroll" : "publicroll";
-    await performPartyQuickRoll(partyActor, kind, definition.id, rollMode);
+    await performPartyQuickRoll(partyActor, kind, definition.id, rollMode, { folderId: payload.folderId, user: requester });
   }
 }
 
@@ -3392,6 +3508,7 @@ function buildStashTotals(stash) {
   }
   return {
     coinGp: fmtNumber(coinGp),
+    itemsGp: fmtNumber(itemsGp),
     wealthGp: fmtNumber(coinGp + itemsGp),
     weight: fmtNumber(weight)
   };
@@ -3447,7 +3564,8 @@ function actorSummary(actor, heroPoints = {}) {
     .sort((a, b) => b.bonus - a.bonus || a.label.localeCompare(b.label, game.i18n.lang));
   return {
     id: actor.id,
-    name: actor.name,
+    folderId: resolveActorFolder(actor.folder)?.id ?? null,
+    name: getPartyMemberName(actor),
     img: actor.img || PARTY_ICON,
     heroPoints: getHeroPointState(heroPoints, actor.id),
     hp: getHp(actor),
@@ -3492,6 +3610,38 @@ function buildLanguageDisplayEntries(stats) {
   });
 }
 
+function filterPartyOverviewStats(stats, members) {
+  const ids = new Set(members.map(member => member.id));
+  const names = new Map(members.map(member => [member.id, member.name]));
+  const skills = (stats.skills ?? []).flatMap(skill => {
+    const rows = (skill.members ?? []).filter(member => ids.has(member.actorId))
+      .map(member => ({ ...member, actorName: names.get(member.actorId) ?? member.actorName }))
+      .sort((a, b) => b.bonus - a.bonus || a.actorName.localeCompare(b.actorName, game.i18n.lang));
+    if (!rows.length) return [];
+    return [{ ...skill, members: rows, best: rows[0].bonus, bestActorId: rows[0].actorId,
+      bestActorName: rows[0].actorName, invested: rows.some(row => row.ranks > 0),
+      tooltip: rows.map(row => `${row.actorName}: ${signed(row.bonus)}`).join("\n"),
+      tooltipHtml: `<div class="pf1-party-skill-tooltip">${rows.map(row =>
+        `<div><span>${escapeHTML(row.actorName)}:</span><b>${signed(row.bonus)}</b></div>`).join("")}</div>`
+    }];
+  });
+  const speeds = members.filter(member => !member.limited).map(member => toNumber(member.speed, 0)).filter(speed => speed > 0);
+  const speed = speeds.length ? Math.min(...speeds) : 0;
+  return { ...stats, members, skills,
+    languages: [...new Set(members.flatMap(member => member.languages ?? []))].sort((a, b) => a.localeCompare(b, game.i18n.lang)),
+    travel: { speed, feetPerMinute: fmtNumber(speed * 10, 0), milesPerHour: fmtNumber(speed / 10, 1), milesPerDay: fmtNumber(speed * 0.8, 1) }
+  };
+}
+
+function buildDisplayedPartyTotals(stash, members) {
+  const totals = buildStashTotals(stash);
+  return {
+    coinGp: fmtNumber(toNumber(totals.coinGp, 0) + members.reduce((sum, member) => sum + toNumber(member.wealth?.coinGp, 0), 0)),
+    wealthGp: fmtNumber(toNumber(totals.wealthGp, 0) + members.reduce((sum, member) => sum + toNumber(member.wealth?.wealthGp, 0), 0)),
+    weight: fmtNumber(toNumber(totals.weight, 0) + members.reduce((sum, member) => sum + toNumber(member.wealth?.weight, 0), 0))
+  };
+}
+
 function getMemberInformationMasks() {
   return deepClone(game.settings.get(MODULE_ID, MEMBER_INFORMATION_MASKS_SETTING) ?? {});
 }
@@ -3499,6 +3649,9 @@ function getMemberInformationMasks() {
 function normalizeInformationMaskEntry(entry = {}) {
   const normalizeMode = mode => ["real", "hidden", "custom"].includes(mode) ? mode : "real";
   return {
+    hideFromOthers: entry.hideFromOthers === true,
+    hideMoney: (entry.hideMoney ?? entry.hideCurrency) === true,
+    hideProperty: (entry.hideProperty ?? entry.hideWealth) === true,
     sensesMode: normalizeMode(entry.sensesMode),
     sensesValue: String(entry.sensesValue ?? "").trim(),
     languagesMode: normalizeMode(entry.languagesMode),
@@ -3620,7 +3773,7 @@ async function performNativeActorCheck(actor, kind, checkId, { skipDialog = true
   } else if (kind === "save" && typeof actor.rollSavingThrow === "function") {
     result = await actor.rollSavingThrow(checkId, options);
   } else {
-    ui.notifications.warn(`Штатный бросок PF1 для «${actor.name}» недоступен.`);
+    ui.notifications.warn(`Штатный бросок PF1 для «${getPartyMemberName(actor)}» недоступен.`);
     return null;
   }
   if (!result) return null;
@@ -3640,7 +3793,7 @@ async function postPartyQuickRollSummary(partyActor, definition, rows, rollMode)
   const hidden = rollMode === "blindroll";
   const content = `<section class="pf1-party-quick-roll-summary">
     <h3><i class="${escapeHTML(definition.icon)}"></i> ${escapeHTML(definition.label)}</h3>
-    <div class="pf1-party-quick-roll-results">${rows.map(row => `<div><span>${escapeHTML(row.actor.name)}</span><b>${escapeHTML(row.total)}</b></div>`).join("")}</div>
+    <div class="pf1-party-quick-roll-results">${rows.map(row => `<div><span>${escapeHTML(getPartyMemberName(row.actor))}</span><b>${escapeHTML(row.total)}</b></div>`).join("")}</div>
     <footer><span>Среднее значение</span><strong>${average}</strong></footer>
   </section>`;
   const data = {
@@ -3655,13 +3808,14 @@ async function postPartyQuickRollSummary(partyActor, definition, rows, rollMode)
   return ChatMessage.create(data);
 }
 
-async function performPartyQuickRoll(partyActor, kind, checkId, rollMode = "publicroll") {
+async function performPartyQuickRoll(partyActor, kind, checkId, rollMode = "publicroll", options = {}) {
   const definition = getQuickRollDefinition(kind, checkId);
   if (!partyActor || !definition) return null;
-  const actors = getPartyMembers(partyActor, { ignorePermissions: true });
-  if (!actors.length) return ui.notifications.warn("В этой папке партии нет персонажей для броска.");
+  const actors = getPartyViewMembers(partyActor, "overview", options);
+  const rollableActors = actors.filter(actor => getPartyMemberAccess(partyActor, actor, options.user ?? game.user) >= 2);
+  if (!rollableActors.length) return ui.notifications.warn("Нет участников с доступом к полным проверкам.");
   const rows = [];
-  for (const actor of actors) {
+  for (const actor of rollableActors) {
     const nativeResult = await performNativeActorCheck(actor, kind, checkId, { skipDialog: true, rollMode });
     if (!nativeResult || !Number.isFinite(nativeResult.total)) continue;
     rows.push({ actor, total: nativeResult.total });
@@ -3676,8 +3830,28 @@ async function rollSkill(actor, skillId, { flavor = null, extraBonus = 0, dc = n
   const heroBonus = toNumber(heroPointBonus, 0);
   const party = partyActor ?? getPartyActor();
   if (heroBonus > 0) {
+    if (typeof actor.rollSkill !== "function") {
+      ui.notifications.warn(`Штатный бросок PF1 для «${getPartyMemberName(actor)}» недоступен.`);
+      return null;
+    }
+    if (!heroPointsEnabled() || getHeroPointValue(getHeroPoints(party), actor.id) < 1) {
+      ui.notifications.warn("Нет геройских очков для этого броска.");
+      return null;
+    }
+    const bonusParts = [`${heroBonus}[Геройское очко]`];
+    if (extraBonus) bonusParts.push(`${toNumber(extraBonus, 0)}[Дополнительный бонус]`);
+    // PF1 builds the full roll and tooltip; create its message only after spending succeeds.
+    const messageData = await actor.rollSkill(skillId, {
+      event: null, skipDialog: true, bonus: bonusParts.join(" + "), chatMessage: false
+    });
+    if (!messageData) return null;
     const spent = await spendHeroPoint(party, actor.id);
     if (!spent) return null;
+    const flags = mergeObject(messageData.flags ?? {}, {
+      [MODULE_ID]: { actorId: actor.id, partyActorId: party?.id ?? null, skillId,
+        heroPointPreBonusUsed: true, heroPointChatBonusUsed: false }
+    }, { inplace: false });
+    return ChatMessage.create({ ...messageData, flags });
   }
   if (typeof actor.rollSkill === "function" && !extraBonus && !dc && !heroBonus) {
     return actor.rollSkill(skillId, { event: null });
@@ -3727,7 +3901,7 @@ async function rollCombatCheck(actor, check, displayedBonus = 0) {
   const roll = await new Roll(formula).roll({ async: true });
   return roll.toMessage({
     speaker: ChatMessage.getSpeaker({ actor }),
-    flavor: `${actor.name}: ${labels[check] ?? "Боевая проверка"}`
+    flavor: `${getPartyMemberName(actor)}: ${labels[check] ?? "Боевая проверка"}`
   });
 }
 
@@ -3748,7 +3922,7 @@ async function rollSavingThrow(actor, saveId, displayedBonus = 0) {
   const roll = await new Roll(formula).roll({ async: true });
   return roll.toMessage({
     speaker: ChatMessage.getSpeaker({ actor }),
-    flavor: `${actor.name}: испытание ${labels[saveId]}`
+    flavor: `${getPartyMemberName(actor)}: испытание ${labels[saveId]}`
   });
 }
 
@@ -3766,7 +3940,7 @@ async function rollAbilityCheck(actor, abilityId, displayedBonus = 0) {
   const roll = await new Roll(formula).roll({ async: true });
   return roll.toMessage({
     speaker: ChatMessage.getSpeaker({ actor }),
-    flavor: `${actor.name}: проверка характеристики ${ABILITY_LABELS_RU[abilityId]}`
+    flavor: `${getPartyMemberName(actor)}: проверка характеристики ${ABILITY_LABELS_RU[abilityId]}`
   });
 }
 
@@ -3789,7 +3963,7 @@ async function rollInitiativeCheck(actor, displayedBonus = 0) {
   const roll = await new Roll(formula).roll({ async: true });
   return roll.toMessage({
     speaker: ChatMessage.getSpeaker({ actor }),
-    flavor: `${actor.name}: инициатива`
+    flavor: `${getPartyMemberName(actor)}: инициатива`
   });
 }
 
@@ -3807,7 +3981,7 @@ async function postFastHealingTurnReminder(combat) {
   const content = `
     <section class="pf1-fast-healing-chat">
       <h3><i class="fas fa-heartbeat"></i> Быстрое лечение</h3>
-      <p><b>${escapeHTML(actor.name)}</b> может восстановить <b>${amount} ПЗ</b> в свой ход.</p>
+      <p><b>${escapeHTML(getPartyMemberName(actor))}</b> может восстановить <b>${amount} ПЗ</b> в свой ход.</p>
       <button type="button" data-action="apply-party-fast-healing" data-actor-id="${actor.id}" data-amount="${amount}" title="Применить быстрое лечение"><i class="fas fa-plus"></i> Восстановить ${amount} ПЗ</button>
     </section>`;
   const compatibilityRoll = await new Roll("0").roll({ async: true });
@@ -3852,7 +4026,7 @@ async function applyFastHealingFromMessage(message, button) {
     button.disabled = true;
     button.innerHTML = `<i class="fas fa-check"></i> Восстановлено ${restored} ПЗ`;
   }
-  ui.notifications.info(`${actor.name}: восстановлено ${restored} ПЗ быстрым лечением.`);
+  ui.notifications.info(`${getPartyMemberName(actor)}: восстановлено ${restored} ПЗ быстрым лечением.`);
 }
 
 function canManageFastHealingMessage(message) {
@@ -3879,7 +4053,7 @@ async function undoFastHealingFromMessage(message) {
     [`flags.${MODULE_ID}.fastHealing.applied`]: false,
     [`flags.${MODULE_ID}.fastHealing.cancelled`]: true
   });
-  ui.notifications.info(`${actor.name}: применение быстрого лечения отменено.`);
+  ui.notifications.info(`${getPartyMemberName(actor)}: применение быстрого лечения отменено.`);
 }
 
 function dialogPromise({ title, content, buttons, defaultButton = "ok", render = null }) {
@@ -4431,6 +4605,9 @@ function defaultMetagameSettings() {
   return {
     showAllPartyStatistics: false,
     autoIdentifyItems: false,
+    groupMembersByFolder: false,
+    hideOtherMemberWealth: false,
+    hidePartyWealthTotals: false,
     hideQuickRollSummary: true,
     hideIdentificationDC: true,
     identifyOnlyAsSelf: false,
@@ -4443,16 +4620,12 @@ function getPartyMetagameSettings(partyActor) {
 }
 
 function userOwnsActor(actor, user = game.user) {
-  return Boolean(actor && (
-    user?.isGM
-    || user?.character?.id === actor.id
-    || actor.isOwner
-    || actor.testUserPermission?.(user, "OWNER")
-  ));
+  return Boolean(actor && getActorUserAccess(actor, user) >= 3);
 }
 
 function canRollPartyActor(partyActor, actor) {
   if (!actor || game.user.isGM) return Boolean(actor);
+  if (getPartyMemberAccess(partyActor, actor) < 2) return false;
   const settings = getPartyMetagameSettings(partyActor);
   return !settings.restrictStatisticRollsToOwned || userOwnsActor(actor);
 }
@@ -4493,12 +4666,16 @@ function metagameDialog(current = {}) {
   const content = `
     <form class="pf1-party-dialog pf1-metagame-dialog">
       <p>Ограничить доступ к метаигровой информации, к которой имеют доступ ваши игроки.</p>
-      <label><span><b>Показывать статистику всей партии</b><em>Игрок видит всех участников и может выполнять разрешённые броски за них, но редактирует только своих.</em></span><input type="checkbox" name="showAllPartyStatistics" ${checked("showAllPartyStatistics")}></label>
+      <input type="checkbox" name="showAllPartyStatistics" hidden ${checked("showAllPartyStatistics")}>
+      <p>Полная статистика доступна наблюдателям и владельцам актёра. Редактирование доступно владельцу независимо от настроек просмотра.</p>
       <label><span><b>Чужая статистика только для просмотра</b><em>Игрок видит статистику всей партии, но бросает проверки только за персонажей, которыми владеет. Мастера ограничение не затрагивает.</em></span><input type="checkbox" name="restrictStatisticRollsToOwned" ${checked("restrictStatisticRollsToOwned")}></label>
       <label><span><b>Скрывать СЛ опознания</b><em>Игроки не видят сложность опознания в таблицах и сообщениях чата. Мастеру СЛ видна всегда.</em></span><input type="checkbox" name="hideIdentificationDC" ${checked("hideIdentificationDC")}></label>
       <label><span><b>Опознание только за себя</b><em>Игрок выполняет броски опознания только назначенным ему персонажем. Мастер по-прежнему может выбрать любого участника партии.</em></span><input type="checkbox" name="identifyOnlyAsSelf" ${checked("identifyOnlyAsSelf")}></label>
       <label><span><b>Автоматически опознавать предметы</b><em>Успешный бросок Колдовства в окне опознания сразу меняет предмет на опознанный.</em></span><input type="checkbox" name="autoIdentifyItems" ${checked("autoIdentifyItems")}></label>
       <label><span><b>Скрывать общую сводку быстрых бросков</b><em>В чате остаются отдельные броски каждого персонажа, без общей сводки и среднего значения.</em></span><input type="checkbox" name="hideQuickRollSummary" ${checked("hideQuickRollSummary")}></label>
+      <label><span><b>Переключать участников по папкам</b><em>Показывает кнопки групп. Состав каждой вкладки и виртуальные группы настраивает мастер в настройках модуля.</em></span><input type="checkbox" name="groupMembersByFolder" ${checked("groupMembersByFolder")}></label>
+      <label><span><b>Скрывать имущество и богатство других персонажей</b><em>В Тайнике игрок видит суммы только своих персонажей. Общий тайник остаётся видимым.</em></span><input type="checkbox" name="hideOtherMemberWealth" ${checked("hideOtherMemberWealth")}></label>
+      <label><span><b>Скрывать общую сумму партии</b><em>Игроки не видят суммарное имущество и богатство партии. Иначе показывается сумма только доступных игроку значений.</em></span><input type="checkbox" name="hidePartyWealthTotals" ${checked("hidePartyWealthTotals")}></label>
     </form>`;
   return dialogPromise({
     title: "Метаигровая информация",
@@ -4591,18 +4768,66 @@ class PF1PartyActorSheet extends ActorSheet {
     const rawStats = !game.user.isGM && publicStats?.members?.length ? publicStats : liveStats;
     const privateStats = applyPartyPrivacySettings(rawStats);
     const stats = game.user.isGM ? privateStats : applyMemberInformationMasks(privateStats);
-    const skills = stats.skills.filter(isPartyOverviewSkill).map(withSkillTone);
-    const knowledgeSkills = stats.skills.filter(isKnowledgeSkill).map(withSkillTone);
+    const folders = getPartyDisplayFolders(this.actor);
+    if (metagame.groupMembersByFolder && this._memberGroupingEnabled === false) this._memberFolderId = null;
+    this._memberGroupingEnabled = metagame.groupMembersByFolder;
+    if (!metagame.groupMembersByFolder) this._memberFolderId = "all";
+    else if (!this._memberFolderId || (this._memberFolderId !== "all" && !folders.some(folder => folder.id === this._memberFolderId))) {
+      this._memberFolderId = folders[0]?.id ?? "all";
+    }
     const sheetMembers = stats.members.map(member => {
       const actor = game.actors.get(member.id);
-      const editable = Boolean(actor && (actor.isOwner || actor.testUserPermission?.(game.user, "OWNER")));
+      const name = getPartyMemberName(actor, member.name);
+      const access = getPartyMemberAccess(this.actor, member);
+      const editable = Boolean(actor && getActorUserAccess(actor) >= 3);
       const rollable = canRollPartyActor(this.actor, actor);
+      if (access < 2) {
+        return { id: member.id, folderId: member.folderId, name, img: member.img,
+          access, limited: true, hp: member.hp, languages: member.languages ?? [],
+          statistics: { editable: false, rollable: false }, rollable: false };
+      }
       // Hero points are live party flags, even when member statistics use a public snapshot.
-      return { ...member, heroPoints: getHeroPointState(heroPoints, member.id), rollable, statistics: { ...member.statistics, editable, rollable } };
+      return { ...member, name, access, limited: false, heroPoints: getHeroPointState(heroPoints, member.id), rollable, statistics: { ...member.statistics, editable, rollable } };
     });
-    const statisticsMembers = game.user.isGM || metagame.showAllPartyStatistics || metagame.restrictStatisticRollsToOwned
-      ? sheetMembers
-      : sheetMembers.filter(member => member.statistics.editable);
+    const displayRules = getMemberDisplayRules(this.actor);
+    const visibleFolderIds = new Set([folders[0]?.id]);
+    for (const member of sheetMembers) {
+      for (const view of Object.keys(MEMBER_VIEWS)) {
+        if (!memberAppearsInView(this.actor, member, view)) continue;
+        const rule = displayRules[member.id]?.[view];
+        const physicalFolder = resolveActorFolder(game.actors.get(member.id)?.folder)?.id ?? member.folderId;
+        visibleFolderIds.add(folders.some(folder => folder.id === rule) ? rule : physicalFolder);
+      }
+    }
+    const visibleFolders = game.user.isGM ? folders : folders.filter(folder => visibleFolderIds.has(folder.id)
+      && getPartyFolderVisibility(this.actor, folder.id) === "visible");
+    if (this._memberFolderId !== "all" && !visibleFolders.some(folder => folder.id === this._memberFolderId)) {
+      this._memberFolderId = visibleFolders[0]?.id ?? "all";
+    }
+    const inView = view => sheetMembers.filter(member => memberAppearsInView(this.actor, member, view, { folderId: this._memberFolderId }));
+    const overviewMembers = inView("overview");
+    const overviewStats = filterPartyOverviewStats(stats, overviewMembers);
+    const skills = overviewStats.skills.filter(isPartyOverviewSkill).map(withSkillTone);
+    const knowledgeSkills = overviewStats.skills.filter(isKnowledgeSkill).map(withSkillTone);
+    const statisticsMembers = inView("statistics").filter(member => member.access >= 2);
+    const stashMembers = inView("stash").map(member => {
+      const mask = normalizeInformationMaskEntry(getMemberInformationMasks()[member.id]);
+      const isOther = !canSeeMemberPrivateInformation(member.id);
+      const hideCurrency = member.limited || (isOther && (metagame.hideOtherMemberWealth || mask.hideMoney));
+      const hideWealth = member.limited || (isOther && (metagame.hideOtherMemberWealth || mask.hideProperty));
+      const wealth = { ...member.wealth };
+      if (hideCurrency) delete wealth.coinGp;
+      if (hideCurrency || hideWealth) delete wealth.itemsGp;
+      if (hideWealth) delete wealth.wealthGp;
+      return { ...member, hideCurrency, hideWealth, wealth };
+    });
+    const partyTotals = buildDisplayedPartyTotals(stash, stashMembers);
+    const hidePartyWealthTotals = !game.user.isGM && metagame.hidePartyWealthTotals;
+    if (hidePartyWealthTotals) {
+      delete partyTotals.coinGp;
+      delete partyTotals.itemsGp;
+      delete partyTotals.wealthGp;
+    }
 
     return mergeObject(data, {
       party: {
@@ -4613,6 +4838,10 @@ class PF1PartyActorSheet extends ActorSheet {
         tokenImg: gprop(this.actor, "prototypeToken.texture.src") || this.actor.img || PARTY_ICON,
         permissionLabel: "Настройки",
         canConfigureMetagame: canManageMetagameSettings(),
+        canConfigureMembers: game.user.isGM,
+        hideWealthTotals: hidePartyWealthTotals,
+        totalLabel: stashMembers.some(member => member.hideCurrency || member.hideWealth) ? "Известные суммы"
+          : metagame.groupMembersByFolder && this._memberFolderId !== "all" ? "Всего в группе" : "Всего в партии",
         canIdentifyItems: true,
         canToggleIdentification: game.user.isGM,
         portraitClass: `pf1-portraits-${game.settings.get(MODULE_ID, "memberPortraitStyle") || "pf2e"}`,
@@ -4620,9 +4849,12 @@ class PF1PartyActorSheet extends ActorSheet {
         heroPointsEnabled: heroPointsEnabled(),
         moduleVersion: MODULE_VERSION_LABEL
       },
-      members: sheetMembers,
+      members: overviewMembers,
       statisticsMembers,
-      languages: buildLanguageDisplayEntries(stats),
+      stashMembers,
+      memberFolders: metagame.groupMembersByFolder
+        ? [{ id: "all", label: "Все" }, ...visibleFolders].map(folder => ({ ...folder, active: folder.id === this._memberFolderId })) : [],
+      languages: buildLanguageDisplayEntries(overviewStats),
       skills,
       knowledgeSkills,
       skillGroups: buildSkillGroups(skills, isBackgroundPartySkill),
@@ -4633,10 +4865,10 @@ class PF1PartyActorSheet extends ActorSheet {
       ],
       quickRollPublic: this._quickRollMode !== "blindroll",
       quickRollHidden: this._quickRollMode === "blindroll",
-      travel: stats.travel,
+      travel: overviewStats.travel,
       stash: buildStashView(stash, this._openStashContainers),
       stashTotals: buildStashTotals(stash),
-      partyTotals: stats.partyTotals
+      partyTotals
     }, { inplace: false });
   }
 
@@ -4685,7 +4917,7 @@ class PF1PartyActorSheet extends ActorSheet {
       event.stopPropagation();
       const data = actor
         ? actor.toDragData()
-        : { type: "PF1PartyMembers", partyActorId: this.actor.id };
+        : { type: "PF1PartyMembers", partyActorId: this.actor.id, folderId: this._memberFolderId };
       nativeEvent.dataTransfer.effectAllowed = "copy";
       nativeEvent.dataTransfer.setData("text/plain", JSON.stringify(data));
     });
@@ -5293,6 +5525,16 @@ class PF1PartyActorSheet extends ActorSheet {
       case "metagame-settings":
         await this._metagameSettings();
         break;
+      case "member-display-settings":
+        if (game.user.isGM) new PF1PartyMemberDisplayForm().render(true);
+        return;
+      case "select-member-folder": {
+        const folderId = button.dataset.folderId;
+        if (folderId !== "all" && !getPartyDisplayFolders(this.actor).some(folder => folder.id === folderId)) return;
+        this._memberFolderId = folderId;
+        this._renderPreservingScroll();
+        return;
+      }
       case "remove-member":
         await removeMember(this.actor, actorId);
         break;
@@ -5303,7 +5545,7 @@ class PF1PartyActorSheet extends ActorSheet {
       case "roll-skill":
         if (actor) {
           await rollSkill(actor, button.dataset.skillId, {
-            flavor: `${actor.name}: ${button.textContent.trim()}`,
+            flavor: `${getPartyMemberName(actor)}: ${button.textContent.trim()}`,
             heroPointBonus: event.shiftKey ? 8 : 0,
             partyActor: this.actor
           });
@@ -5496,14 +5738,14 @@ class PF1PartyActorSheet extends ActorSheet {
   }
 
   async _chooseSkillRoller(skillId, label, { heroPointBonus = 0 } = {}) {
-    const rows = getPartyMembers(this.actor, { ignorePermissions: true })
+    const rows = getPartyViewMembers(this.actor, "overview", { folderId: this._memberFolderId })
       .filter(actor => canRollPartyActor(this.actor, actor))
       .map(actor => ({ actor, bonus: getSkillBonus(actor, skillId) }))
-      .sort((a, b) => b.bonus - a.bonus || a.actor.name.localeCompare(b.actor.name, game.i18n.lang));
+      .sort((a, b) => b.bonus - a.bonus || getPartyMemberName(a.actor).localeCompare(getPartyMemberName(b.actor), game.i18n.lang));
     if (!rows.length) return ui.notifications.warn("Нет доступных персонажей для этого броска.");
 
     const options = rows
-      .map(row => `<option value="${escapeHTML(row.actor.id)}">${escapeHTML(row.actor.name)} ${signed(row.bonus)}</option>`)
+      .map(row => `<option value="${escapeHTML(row.actor.id)}">${escapeHTML(getPartyMemberName(row.actor))} ${signed(row.bonus)}</option>`)
       .join("");
     const result = await dialogPromise({
       title: `Бросок навыка: ${escapeHTML(label || skillId)}`,
@@ -5527,7 +5769,7 @@ class PF1PartyActorSheet extends ActorSheet {
     const actor = game.actors.get(result);
     if (!actor) return;
     await rollSkill(actor, skillId, {
-      flavor: `${actor.name}: ${label || skillId}`,
+      flavor: `${getPartyMemberName(actor)}: ${label || skillId}`,
       heroPointBonus,
       partyActor: this.actor
     });
@@ -5537,10 +5779,11 @@ class PF1PartyActorSheet extends ActorSheet {
     const definition = getQuickRollDefinition(kind, checkId);
     if (!definition) return;
     const rollMode = this._quickRollMode === "blindroll" ? "blindroll" : "publicroll";
-    const members = getPartyMembers(this.actor, { ignorePermissions: true });
+    const members = getPartyViewMembers(this.actor, "overview", { folderId: this._memberFolderId })
+      .filter(actor => getPartyMemberAccess(this.actor, actor) >= 2);
     const canRollLocally = game.user.isGM || members.every(actor => actor.isOwner || actor.testUserPermission?.(game.user, "OWNER"));
     if (canRollLocally) {
-      await performPartyQuickRoll(this.actor, kind, checkId, rollMode);
+      await performPartyQuickRoll(this.actor, kind, checkId, rollMode, { folderId: this._memberFolderId });
       return;
     }
     const activeGM = game.users?.activeGM;
@@ -5548,6 +5791,7 @@ class PF1PartyActorSheet extends ActorSheet {
     game.socket.emit(SOCKET_CHANNEL, {
       action: "quick-party-roll",
       partyActorId: this.actor.id,
+      folderId: this._memberFolderId,
       kind,
       checkId,
       rollMode,
@@ -5560,7 +5804,7 @@ class PF1PartyActorSheet extends ActorSheet {
     const rest = await longRestDialog();
     if (!rest) return;
 
-    for (const actor of getPartyMembers(this.actor)) {
+    for (const actor of getPartyViewMembers(this.actor, "statistics", { folderId: this._memberFolderId })) {
       if (!actor.testUserPermission(game.user, "OWNER")) continue;
       let handledBySystem = false;
       if (typeof actor.performRest === "function") {
@@ -5617,7 +5861,7 @@ class PF1PartyActorSheet extends ActorSheet {
   }
 
   async _splitCurrency() {
-    const members = getPartyMembers(this.actor).filter(actor => actor.testUserPermission(game.user, "OWNER"));
+    const members = getPartyViewMembers(this.actor, "stash", { folderId: this._memberFolderId }).filter(actor => actor.testUserPermission(game.user, "OWNER"));
     if (!members.length) return ui.notifications.warn("Нет доступных участников партии для распределения монет.");
 
     const stash = getStash(this.actor);
@@ -5686,10 +5930,10 @@ class PF1PartyActorSheet extends ActorSheet {
   }
 
   async _takeItem(stashId) {
-    const members = getPartyMembers(this.actor).filter(actor => actor.testUserPermission(game.user, "OWNER"));
+    const members = getPartyViewMembers(this.actor, "stash", { folderId: this._memberFolderId }).filter(actor => actor.testUserPermission(game.user, "OWNER"));
     if (!members.length) return ui.notifications.warn("Нет доступных листов персонажей.");
 
-    const options = members.map(actor => `<option value="${actor.id}">${actor.name}</option>`).join("");
+    const options = members.map(actor => `<option value="${actor.id}">${escapeHTML(getPartyMemberName(actor))}</option>`).join("");
     const result = await dialogPromise({
       title: "Забрать предмет",
       content: `<form class="pf1-party-dialog"><div class="form-group"><label>Кому передать?</label><select name="actorId">${options}</select></div></form>`,
@@ -5801,7 +6045,7 @@ class PF1PartyActorSheet extends ActorSheet {
 }
 
 function getIdentificationActorsForCurrentUser(partyActor) {
-  const members = getPartyMembers(partyActor, { ignorePermissions: true });
+  const members = getPartyViewMembers(partyActor, "stash");
   const settings = getPartyMetagameSettings(partyActor);
   if (game.user.isGM || !settings.identifyOnlyAsSelf) return members;
   return members.filter(actor => actor.id === game.user.character?.id);
@@ -5816,7 +6060,7 @@ async function whisperFailedStashCurseIdentification(actor, entry) {
     whisper: recipients,
     content: `<section class="pf1-identification-chat-curse-secret">
       <h4><i class="fas fa-user-secret"></i> Неопознанное проклятие</h4>
-      <p><b>${escapeHTML(actor.name)}</b> опознал предмет <b>${escapeHTML(entry.realName || entry.name)}</b>, но не распознал его проклятие.</p>
+      <p><b>${escapeHTML(getPartyMemberName(actor))}</b> опознал предмет <b>${escapeHTML(entry.realName || entry.name)}</b>, но не распознал его проклятие.</p>
       <p>Результат: <b>${toNumber(entry.roll?.total, 0)}</b>; СЛ проклятия: <b>${entry.curseIdentifyDC}</b>.</p>
     </section>`,
     flags: {
@@ -6011,7 +6255,7 @@ class PF1StashIdentificationApp extends Application {
     const options = members.map(actor => {
       const bonus = getSkillBonus(actor, "spl");
       const canSeeBonus = game.user.isGM || actor.testUserPermission?.(game.user, "OWNER") || game.user.character?.id === actor.id;
-      return `<option value="${actor.id}">${escapeHTML(actor.name)}${canSeeBonus ? ` (${signed(bonus)})` : ""}</option>`;
+      return `<option value="${actor.id}">${escapeHTML(getPartyMemberName(actor))}${canSeeBonus ? ` (${signed(bonus)})` : ""}</option>`;
     }).join("");
     const content = `<form class="pf1-party-dialog"><div class="form-group"><label>Персонаж</label><select name="actorId">${options}</select></div><p>Для каждого неопознанного предмета будет выполнена отдельная проверка Колдовства.</p></form>`;
     const actorId = await dialogPromise({
@@ -6192,7 +6436,7 @@ async function createPartyMembersOnCanvas(data, event = null) {
     ui.notifications.warn("У вас нет разрешения создавать токены на сцене.");
     return false;
   }
-  const members = getPartyMembers(party, { ignorePermissions: true });
+  const members = getPartyViewMembers(party, "overview", { folderId: data.folderId });
   const allowed = members.filter(actor => game.user.isGM || actor.testUserPermission(game.user, "OWNER"));
   if (allowed.length !== members.length) ui.notifications.warn("Будут размещены только персонажи, которыми вы владеете.");
   if (!allowed.length) return false;
@@ -6376,7 +6620,7 @@ async function useHeroPointOnChatMessage(message) {
       <span class="pf1-hero-point-chat-icon"><img src="${HERO_POINT_ICON}" alt=""></span>
       <div class="pf1-hero-point-chat-text">
         <strong>Использовано геройское очко</strong>
-        <span>${escapeHTML(actor.name)}: ${fmtNumber(total)} + ${HERO_POINT_CHAT_BONUS} = <b>${fmtNumber(finalTotal)}</b></span>
+        <span>${escapeHTML(getPartyMemberName(actor))}: ${fmtNumber(total)} + ${HERO_POINT_CHAT_BONUS} = <b>${fmtNumber(finalTotal)}</b></span>
       </div>
     </div>`;
   const flags = {
@@ -6644,11 +6888,92 @@ class PF1PartyMenusForm extends FormApplication {
   }
 }
 
+class PF1PartyMemberDisplayForm extends FormApplication {
+  static get defaultOptions() {
+    return mergeObject(super.defaultOptions, {
+      id: "pf1-party-member-display", title: "Состав и группы меню партии",
+      template: `modules/${MODULE_ID}/templates/member-display.hbs`,
+      width: 860, height: 650, resizable: true, closeOnSubmit: false
+    }, { inplace: false });
+  }
+
+  async getData(options = {}) {
+    const data = await super.getData(options);
+    const parties = getPartyActors().map(party => {
+      const folders = getPartyDisplayFolders(party);
+      const rules = getMemberDisplayRules(party);
+      const folderRules = game.settings.get(MODULE_ID, FOLDER_VISIBILITY_SETTING)?.[party.id] ?? {};
+      const players = [...(game.users ?? [])].filter(user => !user.isGM);
+      const accessChoices = [{ id: "visible", label: "Показывать" }, { id: "hidden", label: "Скрывать" }];
+      const folderVisibility = folders.map(folder => {
+        const rule = normalizeFolderVisibilityRule(folderRules[folder.id]);
+        const prefix = `folderVisibility.${party.id}.${folder.id}`;
+        return { ...folder, name: `${prefix}.default`,
+          choices: accessChoices.map(choice => ({ ...choice, selected: choice.id === rule.default })),
+          players: players.map(user => ({ id: user.id, label: user.name, name: `${prefix}.users.${user.id}`,
+            choices: [{ id: "inherit", label: "По общей настройке" }, ...accessChoices].map(choice => ({ ...choice,
+              selected: choice.id === (rule.users[user.id] ?? "inherit") }))
+          }))
+        };
+      });
+      const choices = [{ id: "hidden", label: "Не показывать" }, { id: "folder", label: "По папке актёра" },
+        { id: "*", label: "Во всех группах" }, ...folders];
+      const members = getPartyMembers(party, { ignorePermissions: true }).map(actor => ({
+        id: actor.id, name: getPartyMemberName(actor), img: actor.img,
+        folder: folders.find(folder => folder.id === resolveActorFolder(actor.folder)?.id)?.label ?? "",
+        views: Object.entries(MEMBER_VIEWS).map(([id, label]) => {
+          const saved = rules[actor.id]?.[id];
+          const selected = choices.some(choice => choice.id === saved) ? saved : "folder";
+          return { id, label, name: `parties.${party.id}.${actor.id}.${id}`,
+            choices: choices.map(choice => ({ ...choice, selected: choice.id === selected })) };
+        })
+      }));
+      return { id: party.id, name: party.name, members, folderVisibility };
+    });
+    return mergeObject(data, { parties }, { inplace: false });
+  }
+
+  async _updateObject(_event, formData) {
+    if (!game.user.isGM) return;
+    const expanded = foundry.utils.expandObject(formData);
+    const submitted = expanded.parties ?? {};
+    const settings = deepClone(game.settings.get(MODULE_ID, MEMBER_DISPLAY_SETTING) ?? {});
+    const folderSettings = deepClone(game.settings.get(MODULE_ID, FOLDER_VISIBILITY_SETTING) ?? {});
+    for (const party of getPartyActors()) {
+      for (const folder of getPartyDisplayFolders(party)) {
+        const entry = expanded.folderVisibility?.[party.id]?.[folder.id];
+        if (!entry || typeof entry !== "object") continue;
+        folderSettings[party.id] = folderSettings[party.id] ?? {};
+        const rule = normalizeFolderVisibilityRule(folderSettings[party.id][folder.id]);
+        if (["visible", "hidden"].includes(entry.default)) rule.default = entry.default;
+        for (const user of [...(game.users ?? [])].filter(user => !user.isGM)) {
+          const mode = entry.users?.[user.id];
+          if (mode === "inherit") delete rule.users[user.id];
+          else if (["visible", "hidden"].includes(mode)) rule.users[user.id] = mode;
+        }
+        folderSettings[party.id][folder.id] = rule;
+      }
+      if (!submitted[party.id]) continue;
+      const valid = new Set(["hidden", "folder", "*", ...getPartyDisplayFolders(party).map(folder => folder.id)]);
+      settings[party.id] = settings[party.id] ?? {};
+      for (const actor of getPartyMembers(party, { ignorePermissions: true })) {
+        const entry = submitted[party.id][actor.id];
+        if (!entry) continue;
+        settings[party.id][actor.id] = Object.fromEntries(Object.keys(MEMBER_VIEWS).map(view =>
+          [view, valid.has(entry[view]) ? entry[view] : "folder"]));
+      }
+    }
+    await game.settings.set(MODULE_ID, MEMBER_DISPLAY_SETTING, settings);
+    await game.settings.set(MODULE_ID, FOLDER_VISIBILITY_SETTING, folderSettings);
+    this.render(false);
+  }
+}
+
 class PF1MemberInformationMasksForm extends FormApplication {
   static get defaultOptions() {
     return mergeObject(super.defaultOptions, {
       id: "pf1-party-member-information-masks",
-      title: "Подмена чувств и языков",
+      title: "Видимость, чувства и языки участников",
       template: `modules/${MODULE_ID}/templates/member-information-masks.hbs`,
       width: 720,
       height: 680,
@@ -6665,7 +6990,7 @@ class PF1MemberInformationMasksForm extends FormApplication {
       const mask = normalizeInformationMaskEntry(masks[actor.id]);
       return {
         id: actor.id,
-        name: actor.name,
+        name: getPartyMemberName(actor),
         img: actor.img,
         realSenses: getSenses(actor),
         realLanguages: getLanguages(actor).join(", ") || "Нет языков",
@@ -6704,7 +7029,7 @@ class PF1MemberInformationMasksForm extends FormApplication {
     for (const [actorId, entry] of Object.entries(expanded.masks ?? {})) {
       if (!memberIds.has(actorId)) continue;
       const mask = normalizeInformationMaskEntry(entry);
-      if (mask.sensesMode !== "real" || mask.languagesMode !== "real") masks[actorId] = mask;
+      if (mask.hideFromOthers || mask.hideMoney || mask.hideProperty || mask.sensesMode !== "real" || mask.languagesMode !== "real") masks[actorId] = mask;
     }
     await game.settings.set(MODULE_ID, MEMBER_INFORMATION_MASKS_SETTING, masks);
   }
@@ -6737,9 +7062,9 @@ Hooks.once("init", () => {
   });
 
   game.settings.registerMenu(MODULE_ID, "memberInformationMasksMenu", {
-    name: "Подмена чувств и языков персонажей",
-    label: "Настроить подмену",
-    hint: "Мастер выбирает настоящие, скрытые или подставные чувства и языки отдельно для каждого участника партии.",
+    name: "Видимость, чувства и языки участников",
+    label: "Настроить видимость",
+    hint: "Мастер скрывает участников, их деньги и богатство от других игроков и выбирает настоящие, скрытые или подставные чувства и языки. Включает компаньонов из подпапок.",
     icon: "fas fa-user-secret",
     type: PF1MemberInformationMasksForm,
     restricted: true
@@ -6752,6 +7077,23 @@ Hooks.once("init", () => {
     icon: "fas fa-users-cog",
     type: PF1PartyMenusForm,
     restricted: true
+  });
+
+  game.settings.registerMenu(MODULE_ID, "memberDisplayMenu", {
+    name: "Состав и группы меню партии", label: "Настроить состав",
+    hint: "Выберите участников Обзора, Статистики и Тайника и их группы отображения, не перемещая актёров между папками.",
+    icon: "fas fa-folder-tree", type: PF1PartyMemberDisplayForm, restricted: true
+  });
+  game.settings.register(MODULE_ID, MEMBER_DISPLAY_SETTING, {
+    name: "Состав и группы меню партии", scope: "world", config: false, type: Object, default: {},
+    onChange: () => renderOpenPartySheets({ refreshSnapshot: false })
+  });
+  game.settings.register(MODULE_ID, FOLDER_VISIBILITY_SETTING, {
+    name: "Видимость подпапок партии", scope: "world", config: false, type: Object, default: {},
+    onChange: () => {
+      renderOpenPartySheets({ refreshSnapshot: false });
+      for (const party of getPartyActors()) renderOpenStashIdentificationApps(party.id);
+    }
   });
 
   game.settings.register(MODULE_ID, MEMBER_INFORMATION_MASKS_SETTING, {
@@ -7028,6 +7370,15 @@ Hooks.on("dropCanvasData", (_canvas, data, event) => {
   });
   return false;
 });
+for (const hook of ["createFolder", "updateFolder", "deleteFolder"]) {
+  Hooks.on(hook, folder => {
+    if (folder.type !== "Actor") return;
+    renderOpenPartySheets();
+    for (const app of Object.values(ui.windows ?? {})) {
+      if (app instanceof PF1PartyMemberDisplayForm || app instanceof PF1MemberInformationMasksForm) app.render(false);
+    }
+  });
+}
 Hooks.on("updateSetting", setting => {
   if (setting.key !== `${RU_IMPROVEMENTS_ID}.replaceUnidentifiedItemIcons`) return;
   renderOpenPartySheets();
@@ -7049,6 +7400,13 @@ Hooks.on("createActor", actor => {
   const party = actor?.getFlag?.(MODULE_ID, PARTY_FLAG) ? actor : getPartyForMember(actor);
   if (party) renderOpenPartySheets();
 });
+Hooks.on("updateUser", (_user, changed) => {
+  if (Object.hasOwn(changed, "character") || Object.hasOwn(changed, "role")) {
+    renderOpenPartySheets({ refreshSnapshot: false });
+  }
+});
+Hooks.on("deleteUser", () => renderOpenPartySheets({ refreshSnapshot: false }));
+Hooks.on("createUser", () => renderOpenPartySheets({ refreshSnapshot: false }));
 Hooks.on("updateActor", async (actor, changed, options = {}, userId = null) => {
   const party = actor?.getFlag?.(MODULE_ID, PARTY_FLAG) ? actor : getPartyForMember(actor);
   const isPartyActor = actor?.id === party?.id;

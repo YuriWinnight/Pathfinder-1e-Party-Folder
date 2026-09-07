@@ -9,6 +9,13 @@
           <strong>{{name}}</strong>
         </header>
 
+        <div class="pf1-information-mask-private">
+          <label><input type="checkbox" name="masks.{{id}}.hideFromOthers" {{#if hideFromOthers}}checked{{/if}}> Скрывать участника от других игроков</label>
+          <label><input type="checkbox" name="masks.{{id}}.hideProperty" {{#if hideProperty}}checked{{/if}}> Скрывать имущество от других игроков</label>
+          <label><input type="checkbox" name="masks.{{id}}.hideMoney" {{#if hideMoney}}checked{{/if}}> Скрывать богатство (деньги) от других игроков</label>
+          <small>Мастер и владелец видят. Общая сумма партии скрывается отдельной настройкой меню.</small>
+        </div>
+
         <div class="pf1-information-mask-field">
           <label for="pf1-mask-senses-{{id}}">Чувства</label>
           <select id="pf1-mask-senses-{{id}}" name="masks.{{id}}.sensesMode" data-mask-kind="senses">

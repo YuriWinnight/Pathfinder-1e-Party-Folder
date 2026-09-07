@@ -1,0 +1,41 @@
+<form class="pf1-member-display-form" autocomplete="off">
+  <p>Настройки меняют только меню партии, не папки актёров. «Не показывать» исключает участника из выбранной вкладки. «Во всех группах» оставляет его видимым при переключении папок. Переключение папок включается в настройках меню партии.</p>
+  <div class="pf1-member-display-list">
+    {{#each parties}}
+      <section>
+        <h2>{{name}}</h2>
+        {{#if folderVisibility.length}}
+          <details class="pf1-folder-visibility" open>
+            <summary><i class="fas fa-folder"></i> Видимость папок для каждого игрока</summary>
+            <p class="notes">Скрытие распространяется на вложенные папки. Во вкладке «Все» сохраняется доступ, назначенный у актёра. Показанная папка без прав актёра даёт ограниченный доступ. Права актёров не меняются.</p>
+            {{#each folderVisibility}}
+              <div class="pf1-folder-access">
+                <strong>{{label}}</strong>
+                <label><span>Общая настройка</span><select name="{{name}}" aria-label="Видимость: {{label}}">
+                  {{#each choices}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+                </select></label>
+                {{#each players}}
+                  <label><span>{{label}}</span><select name="{{name}}" aria-label="{{label}}: {{../label}}">
+                    {{#each choices}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+                  </select></label>
+                {{/each}}
+              </div>
+            {{/each}}
+          </details>
+        {{/if}}
+        <div class="pf1-member-display-head"><span>Участник</span><span>Обзор</span><span>Статистика</span><span>Тайник</span></div>
+        {{#each members}}
+          <div class="pf1-member-display-row">
+            <div class="pf1-member-display-name"><img src="{{img}}" alt=""><span><b>{{name}}</b><small>{{folder}}</small></span></div>
+            {{#each views}}
+              <label><span class="pf1-member-display-view-label">{{label}}</span><select name="{{name}}" aria-label="{{label}}: {{../name}}">
+                {{#each choices}}<option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+              </select></label>
+            {{/each}}
+          </div>
+        {{else}}<p class="notes">В этой партии пока нет участников.</p>{{/each}}
+      </section>
+    {{else}}<p class="notes">Меню партии ещё не создано.</p>{{/each}}
+  </div>
+  <footer class="sheet-footer flexrow"><button type="submit"><i class="fas fa-save"></i> Сохранить</button></footer>
+</form>
