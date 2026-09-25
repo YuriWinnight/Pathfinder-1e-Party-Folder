@@ -12700,6 +12700,96 @@ body > .pf1-party-floating-stat-tooltip .inline-roll {
   }
 }
 
+.window-app.pf1-party-folder .pf1-party-stash-main {
+  --pf1-stash-columns: minmax(0, 1fr) 68px var(--pf1-inventory-price) var(--pf1-inventory-quantity) var(--pf1-inventory-bulk) var(--pf1-inventory-controls);
+}
+
+.window-app.pf1-party-folder .pf1-stash-category > summary,
+.window-app.pf1-party-folder .pf1-stash-item,
+.window-app.pf1-party-folder .pf1-stash-container-item {
+  display: grid !important;
+  grid-template-columns: var(--pf1-stash-columns) !important;
+  column-gap: 0 !important;
+  align-items: center !important;
+}
+
+.window-app.pf1-party-folder .pf1-stash-category-name { grid-column: 1 / span 2; }
+.window-app.pf1-party-folder :is(.pf1-stash-item-name, .pf1-stash-container-item-name) { grid-column: 1; }
+.window-app.pf1-party-folder .pf1-stash-charges { grid-column: 2; }
+.window-app.pf1-party-folder .pf1-stash-charges:empty { display: none; }
+.window-app.pf1-party-folder .pf1-stash-name-wide { grid-column: 1 / span 2 !important; }
+.window-app.pf1-party-folder :is(.pf1-stash-price, .pf1-stash-heading-price) { grid-column: 3; }
+.window-app.pf1-party-folder :is(.pf1-stash-quantity, .pf1-stash-heading-quantity) { grid-column: 4; }
+.window-app.pf1-party-folder :is(.pf1-stash-weight, .pf1-stash-heading-weight) { grid-column: 5 !important; }
+.window-app.pf1-party-folder :is(.pf1-stash-item-controls, .pf1-stash-category-controls, .pf1-stash-container-identify) { grid-column: 6; }
+.window-app.pf1-party-folder .pf1-stash-container-identify { justify-self: end; }
+.window-app.pf1-party-folder :is(.pf1-stash-item-description, .pf1-stash-container-contents) { grid-column: 1 / -1; }
+
+.window-app.pf1-party-folder .pf1-stash-container-contents { padding: 0 !important; }
+.window-app.pf1-party-folder .pf1-stash-container-item-name { padding-left: .75rem !important; }
+.window-app.pf1-party-folder .pf1-stash-container-item::before,
+.window-app.pf1-party-folder .pf1-stash-container-item::after { left: .25rem !important; }
+
+.window-app.pf1-party-folder .pf1-stash-charges label {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end;
+  gap: 2px !important;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.window-app.pf1-party-folder .pf1-stash-charges input,
+.window-app.pf1-party-folder .pf1-stash-charges input.pf1-stash-container-field {
+  flex: 0 0 28px !important;
+  width: 28px !important;
+  min-width: 0 !important;
+  height: 22px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  text-align: center !important;
+  appearance: textfield;
+}
+
+.window-app.pf1-party-folder .pf1-stash-charges input::-webkit-inner-spin-button,
+.window-app.pf1-party-folder .pf1-stash-charges input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.window-app.pf1-party-folder .pf1-stash-charges span {
+  flex: 0 0 auto;
+  padding: 0;
+  margin: 0;
+}
+
+.window-app.pf1-party-folder .pf1-stash-charges span:last-child {
+  min-width: 28px;
+  text-align: center;
+}
+
+.pf1-party-settings-window {
+  min-width: 360px;
+  min-height: 280px;
+  max-width: 100vw;
+  max-height: 100vh;
+}
+
+.pf1-party-settings-window .window-content {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.pf1-party-settings-window .dialog-content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+
+.pf1-party-settings-window .dialog-buttons { flex: 0 0 auto; }
+
 /* Size party tooltip backdrops with their content, not Foundry's 320px default. */
 :is(#tooltip, .locked-tooltip):has(.pf1-party-skill-tooltip, .pf1-skill-tooltip, .pf1-language-tooltip, .pf1-stat-bonus-tooltip),
 body > .pf1-party-floating-stat-tooltip {

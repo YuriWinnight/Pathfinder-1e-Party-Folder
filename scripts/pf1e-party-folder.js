@@ -58,7 +58,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.2.3";
+const MODULE_VERSION_LABEL = "v2.2.7";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -2129,11 +2129,18 @@ function getItemPriceGpEach(itemData) {
   const legacyPrice = isDocumentLike(itemData) ? undefined : gprop(itemData, "data.data.price");
   const raw = gprop(itemData, "system.price") ?? gprop(itemData, "system.price.value") ?? legacyPrice ?? 0;
   const uses = itemData?.system?.uses;
-  return parsePriceToGp(raw) + Math.max(0, toNumber(uses?.pricePerUse, 0)) * Math.max(0, toNumber(uses?.value, 0));
+  const price = isItemIdentified(itemData)
+    ? parsePriceToGp(raw) + Math.max(0, toNumber(uses?.pricePerUse, 0)) * Math.max(0, toNumber(uses?.value, 0))
+    : parsePriceToGp(gprop(itemData, "system.unidentified.price") ?? 0);
+  return price * (itemData?.system?.broken ? 0.75 : 1);
 }
 
 function setItemPriceGpEach(itemData, priceGp) {
-  const value = Math.max(0, toNumber(priceGp, 0));
+  const value = Math.max(0, toNumber(priceGp, 0)) / (itemData?.system?.broken ? 0.75 : 1);
+  if (!isItemIdentified(itemData)) {
+    sprop(itemData, "system.unidentified.price", value);
+    return itemData;
+  }
   const uses = itemData?.system?.uses;
   if (toNumber(uses?.pricePerUse, 0) > 0 && toNumber(uses?.value, 0) > 0) {
     const basePrice = Math.min(value, parsePriceToGp(itemData.system.price));
@@ -2153,6 +2160,22 @@ function setItemWeightEach(itemData, weight) {
   else if (!isDocumentLike(itemData) && has(itemData, "data.data.weight")) sprop(itemData, "data.data.weight", value);
   else sprop(itemData, "system.weight", value);
   return itemData;
+}
+
+function getItemChargesView(source) {
+  const uses = source?.system?.uses;
+  const hasCharges = !!uses && (["charges", "day", "week"].includes(uses.per)
+    || toNumber(uses.max, 0) > 0 || toNumber(uses.pricePerUse, 0) > 0);
+  return { hasCharges, charges: Math.max(0, Math.floor(toNumber(uses?.value, 0))),
+    chargesMax: Math.max(0, Math.floor(toNumber(uses?.max, 0))) };
+}
+
+function setItemCharges(source, value) {
+  const { hasCharges, charges, chargesMax } = getItemChargesView(source);
+  if (!hasCharges) return source;
+  const next = Math.max(0, Math.floor(toNumber(value, charges)));
+  sprop(source, "system.uses.value", chargesMax > 0 ? Math.min(next, chargesMax) : next);
+  return source;
 }
 
 function isDocumentLike(value) {
@@ -2440,7 +2463,11 @@ function ruImprovementsUnknownIconsEnabled() {
   }
 }
 
-function getRuImprovementsIdentificationImage(source) {
+function getRuImprovementsIdentificationImage(source, replaceUnknownIcons = true) {
+  if (!replaceUnknownIcons) {
+    return gprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_UNKNOWN_ICON_FLAG}.originalImg`)
+      || source?.img || "icons/svg/item-bag.svg";
+  }
   if (!activeRuImprovementsModule()) return source?.img || "icons/svg/item-bag.svg";
   if (isItemIdentified(source) || !ruImprovementsUnknownIconsEnabled()) {
     return gprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_UNKNOWN_ICON_FLAG}.originalImg`)
@@ -2462,6 +2489,18 @@ function synchronizeStashSourceImages(source) {
   source.img = getRuImprovementsIdentificationImage(source);
   for (const child of arrayFromMaybeObject(source.system?.inventoryItems)) synchronizeStashSourceImages(child);
   return source;
+}
+
+function restoreStashTransferImages(source) {
+  // Ru's preCreateItem stores data.img as the original, even when flags already contain it.
+  const original = gprop(source, `flags.${RU_IMPROVEMENTS_ID}.${RU_IMPROVEMENTS_UNKNOWN_ICON_FLAG}.originalImg`);
+  if (original && isRuImprovementsUnknownIcon(source.img)) source.img = original;
+  for (const child of arrayFromMaybeObject(source.system?.inventoryItems)) restoreStashTransferImages(child);
+  return source;
+}
+
+function prepareStashItemSourceForActor(stashItem) {
+  return restoreStashTransferImages(prepareStashItemSourceForPF1Sheet(stashItem));
 }
 
 function getItemIdentificationView(source) {
@@ -2502,7 +2541,7 @@ function getItemAuraView(source) {
   };
 }
 
-function buildIdentificationEntry(source, stashId, containerItemId = null, containerName = "") {
+function buildIdentificationEntry(source, stashId, containerItemId = null, containerName = "", replaceUnknownIcons = true) {
   const item = ensureItemSourceBasics(deepClone(source), source);
   const identified = isItemIdentified(item);
   return {
@@ -2511,22 +2550,22 @@ function buildIdentificationEntry(source, stashId, containerItemId = null, conta
     containerName,
     realName: item.name || "Предмет",
     name: getItemDisplayName(item),
-    img: getRuImprovementsIdentificationImage(item),
+    img: getRuImprovementsIdentificationImage(item, replaceUnknownIcons),
     ...getItemIdentificationView(item),
     ...getItemAuraView(item)
   };
 }
 
-function buildStashIdentificationData(stash) {
+function buildStashIdentificationData(stash, replaceUnknownIcons = true) {
   const identified = [];
   const unidentified = [];
   for (const stashItem of stash.items ?? []) {
     const source = getStashItemSource(stashItem);
-    const entry = buildIdentificationEntry(source, stashItem.stashId);
+    const entry = buildIdentificationEntry(source, stashItem.stashId, null, "", replaceUnknownIcons);
     if (entry.magical) (entry.identified ? identified : unidentified).push(entry);
     if (String(source.type).toLowerCase() !== "container" && source.system?.inventoryItems == null) continue;
     for (const nested of normalizeContainerInventoryItems(source.system?.inventoryItems)) {
-      const nestedEntry = buildIdentificationEntry(nested, stashItem.stashId, nested._id || nested.id, source.name);
+      const nestedEntry = buildIdentificationEntry(nested, stashItem.stashId, nested._id || nested.id, source.name, replaceUnknownIcons);
       if (nestedEntry.magical) (nestedEntry.identified ? identified : unidentified).push(nestedEntry);
     }
   }
@@ -2653,7 +2692,7 @@ async function handlePartyFolderSocket(payload) {
   }
 }
 
-function getStashItemView(stashItem) {
+function getStashItemView(stashItem, replaceUnknownIcons = true) {
   const data = stashItem.data ?? stashItem;
   const quantity = getItemQuantity(data);
   const priceEach = getItemPriceGpEach(data);
@@ -2670,13 +2709,14 @@ function getStashItemView(stashItem) {
     return {
       itemId: source._id || source.id,
       name: getItemDisplayName(source),
-      img: getRuImprovementsIdentificationImage(source),
+      img: getRuImprovementsIdentificationImage(source, replaceUnknownIcons),
       quantity,
       priceGp: fmtNumber(quantity > 0 ? priceEach * quantity : priceEach),
       priceEach: fmtNumber(priceEach),
       weight: fmtNumber(quantity > 0 ? weightEach * quantity : weightEach),
       weightEach: fmtNumber(weightEach),
       search: `${getItemDisplayName(source, "")} ${source.type || ""}`.toLowerCase(),
+      ...getItemChargesView(source),
       ...getItemIdentificationView(source)
     };
   }) : [];
@@ -2684,7 +2724,7 @@ function getStashItemView(stashItem) {
     ...stashItem,
     name: getItemDisplayName(data, stashItem.name || "Предмет"),
     type: stashItem.type || data.type || "loot",
-    img: getRuImprovementsIdentificationImage(data),
+    img: getRuImprovementsIdentificationImage(data, replaceUnknownIcons),
     quantity,
     emptyStack: quantity <= 0,
     weight: fmtNumber(weightTotal),
@@ -2694,6 +2734,7 @@ function getStashItemView(stashItem) {
     isContainer,
     containerItems,
     containerItemCount: containerItems.length,
+    ...getItemChargesView(data),
     description: getItemDescriptionHTML(data).trim(),
     search: `${getItemDisplayName(data, stashItem.name || "")} ${stashItem.type || data.type || ""} ${containerItems.map(item => item.name).join(" ")}`.toLowerCase(),
     ...getItemIdentificationView(data)
@@ -2978,6 +3019,15 @@ function getInlineStashContainerContext(partyActor, containerStashId, itemId = n
   return { stash, containerIndex, containerSource, inventory, itemIndex };
 }
 
+async function updateInlineStashContainerItemSource(partyActor, containerStashId, itemId, source) {
+  const context = getInlineStashContainerContext(partyActor, containerStashId, itemId);
+  if (!context || context.itemIndex < 0) return;
+  if (source) context.inventory[context.itemIndex] = { ...deepClone(source), _id: itemId };
+  else context.inventory.splice(context.itemIndex, 1);
+  context.containerSource.system.inventoryItems = context.inventory;
+  await updateStashItemSource(partyActor, containerStashId, context.containerSource);
+}
+
 function prepareContainerContentSource(source, inventory = []) {
   const prepared = normalizeContainerInventoryItems([source])[0];
   if (!prepared) return null;
@@ -3229,7 +3279,7 @@ function buildStashContainerDropPayload(ref, itemId) {
     actorId: context.party.id,
     containerId: ref.item?.id ?? ref.item?._id ?? ref.stashId,
     itemId,
-    data: context.itemSource
+    data: restoreStashTransferImages(context.itemSource)
   };
 }
 
@@ -3465,7 +3515,7 @@ function categoryForItem(item) {
   return "equipment";
 }
 
-function buildStashView(stash, openContainerIds = new Set()) {
+function buildStashView(stash, openContainerIds = new Set(), replaceUnknownIcons = true) {
   const categories = [
     { id: "weapons", label: "Оружие и щиты", items: [] },
     { id: "armor", label: "Броня/Снаряжение", items: [] },
@@ -3479,7 +3529,7 @@ function buildStashView(stash, openContainerIds = new Set()) {
   const byId = new Map(categories.map(c => [c.id, c]));
 
   for (const raw of stash.items ?? []) {
-    const item = getStashItemView(raw);
+    const item = getStashItemView(raw, replaceUnknownIcons);
     item.containerOpen = item.isContainer && openContainerIds.has(item.stashId);
     const category = byId.get(categoryForItem(item)) ?? byId.get("equipment");
     category.items.push(item);
@@ -3496,6 +3546,15 @@ function buildStashView(stash, openContainerIds = new Set()) {
   };
 }
 
+function getStashItemValueGp(source) {
+  let value = getItemPriceGpEach(source) * getItemQuantity(source);
+  if (source.type === "container" || source.system?.inventoryItems != null) {
+    value += currencyToGp(source.system?.currency);
+    for (const child of arrayFromMaybeObject(source.system?.inventoryItems)) value += getStashItemValueGp(child);
+  }
+  return value;
+}
+
 function buildStashTotals(stash) {
   const coinGp = currencyToGp(stash.currency);
   let itemsGp = 0;
@@ -3503,7 +3562,7 @@ function buildStashTotals(stash) {
   for (const item of stash.items ?? []) {
     const data = getItemSourceData(item);
     const q = getItemQuantity(data);
-    itemsGp += getItemPriceGpEach(data) * q;
+    itemsGp += getStashItemValueGp(data);
     weight += getItemWeightEach(data) * q;
   }
   return {
@@ -3530,7 +3589,7 @@ function buildPartyTotals(stash, members) {
   for (const item of stash.items ?? []) {
     const data = getItemSourceData(item);
     const q = getItemQuantity(data);
-    itemsGp += getItemPriceGpEach(data) * q;
+    itemsGp += getStashItemValueGp(data);
     weight += getItemWeightEach(data) * q;
   }
   for (const actor of members) {
@@ -4056,7 +4115,7 @@ async function undoFastHealingFromMessage(message) {
   ui.notifications.info(`${getPartyMemberName(actor)}: применение быстрого лечения отменено.`);
 }
 
-function dialogPromise({ title, content, buttons, defaultButton = "ok", render = null }) {
+function dialogPromise({ title, content, buttons, defaultButton = "ok", render = null, options = {} }) {
   return new Promise(resolve => {
     const wrappedButtons = {};
     for (const [id, button] of Object.entries(buttons)) {
@@ -4072,7 +4131,7 @@ function dialogPromise({ title, content, buttons, defaultButton = "ok", render =
       default: defaultButton,
       render,
       close: () => resolve(null)
-    }).render(true);
+    }, options).render(true);
   });
 }
 
@@ -4103,13 +4162,13 @@ const PARTY_TOKEN_COLORS = {
 };
 
 const PARTY_TOKEN_CREATURES = [
-  ["Медведь", "bear"], ["Олень", "deer elk"], ["Волк", "wolf"], ["Кролик", "rabbit hare"],
+  ["Медведь", "bear"], ["Олень", "deer elk"], ["Волк", "wolf"], ["Дракон", "dragon wyrm"],
   ["Единорог", "unicorn"], ["Кабан", "boar"], ["Козёл", "goat ibex ram"], ["Паук", "spider"],
-  ["Кобра", "cobra snake serpent"], ["Лошадь", "horse"], ["Обезьяна", "monkey ape"], ["Лиса", "fox"],
-  ["Белка", "squirrel"], ["Кошка", "cat"], ["Крыса", "rat mouse"], ["Осьминог", "octopus kraken"],
-  ["Дельфин", "dolphin"], ["Колибри", "hummingbird bird"], ["Дракон", "dragon wyrm"], ["Кентавр", "centaur"],
-  ["Грифон", "griffon gryphon"], ["Динозавр", "dinosaur raptor"], ["Олень в прыжке", "jumping deer stag"], ["Слон", "elephant"],
-  ["Кенгуру", "kangaroo"], ["Бык", "bull ox cow"], ["Лягушка", "frog toad"], ["Орёл", "eagle bird"],
+  ["Змея", "snake cobra serpent"], ["Лошадь", "horse"], ["Лев", "lion"], ["Ящерица", "lizard"],
+  ["Лягушка", "frog toad"], ["Заяц", "hare rabbit"], ["Медведь", "bear"], ["Осьминог", "octopus kraken"],
+  ["Рыба", "fish"], ["Птица", "bird"], ["Дракон", "dragon wyrm"], ["Кентавр", "centaur"],
+  ["Грифон", "griffon gryphon"], ["Козёл", "goat ibex"], ["Олень", "deer stag"], ["Слон", "elephant"],
+  ["Единорог", "unicorn"], ["Слон", "elephant"], ["Баран", "ram sheep"], ["Орёл", "eagle bird"],
   ["Лошадь, голова", "horse head"], ["Лев", "lion"]
 ];
 
@@ -4605,6 +4664,7 @@ function defaultMetagameSettings() {
   return {
     showAllPartyStatistics: false,
     autoIdentifyItems: false,
+    replaceUnidentifiedStashIcons: true,
     groupMembersByFolder: false,
     hideOtherMemberWealth: false,
     hidePartyWealthTotals: false,
@@ -4672,6 +4732,7 @@ function metagameDialog(current = {}) {
       <label><span><b>Скрывать СЛ опознания</b><em>Игроки не видят сложность опознания в таблицах и сообщениях чата. Мастеру СЛ видна всегда.</em></span><input type="checkbox" name="hideIdentificationDC" ${checked("hideIdentificationDC")}></label>
       <label><span><b>Опознание только за себя</b><em>Игрок выполняет броски опознания только назначенным ему персонажем. Мастер по-прежнему может выбрать любого участника партии.</em></span><input type="checkbox" name="identifyOnlyAsSelf" ${checked("identifyOnlyAsSelf")}></label>
       <label><span><b>Автоматически опознавать предметы</b><em>Успешный бросок Колдовства в окне опознания сразу меняет предмет на опознанный.</em></span><input type="checkbox" name="autoIdentifyItems" ${checked("autoIdentifyItems")}></label>
+      <label><span><b>Менять иконки неопознанных предметов в тайнике</b><em>Использует иконки Ru Improvements, если замена включена в нём. При отключении показывает исходные изображения в тайнике и таблицах опознания.</em></span><input type="checkbox" name="replaceUnidentifiedStashIcons" ${checked("replaceUnidentifiedStashIcons")}></label>
       <label><span><b>Скрывать общую сводку быстрых бросков</b><em>В чате остаются отдельные броски каждого персонажа, без общей сводки и среднего значения.</em></span><input type="checkbox" name="hideQuickRollSummary" ${checked("hideQuickRollSummary")}></label>
       <label><span><b>Переключать участников по папкам</b><em>Показывает кнопки групп. Состав каждой вкладки и виртуальные группы настраивает мастер в настройках модуля.</em></span><input type="checkbox" name="groupMembersByFolder" ${checked("groupMembersByFolder")}></label>
       <label><span><b>Скрывать имущество и богатство других персонажей</b><em>В Тайнике игрок видит суммы только своих персонажей. Общий тайник остаётся видимым.</em></span><input type="checkbox" name="hideOtherMemberWealth" ${checked("hideOtherMemberWealth")}></label>
@@ -4679,6 +4740,12 @@ function metagameDialog(current = {}) {
     </form>`;
   return dialogPromise({
     title: "Метаигровая информация",
+    options: {
+      classes: ["dialog", "pf1-party-settings-window"],
+      resizable: true,
+      width: 620,
+      height: Math.min(700, Math.max(320, window.innerHeight - 80))
+    },
     content,
     buttons: {
       ok: {
@@ -4866,7 +4933,7 @@ class PF1PartyActorSheet extends ActorSheet {
       quickRollPublic: this._quickRollMode !== "blindroll",
       quickRollHidden: this._quickRollMode === "blindroll",
       travel: overviewStats.travel,
-      stash: buildStashView(stash, this._openStashContainers),
+      stash: buildStashView(stash, this._openStashContainers, metagame.replaceUnidentifiedStashIcons),
       stashTotals: buildStashTotals(stash),
       partyTotals
     }, { inplace: false });
@@ -5038,12 +5105,16 @@ class PF1PartyActorSheet extends ActorSheet {
 
 
   _onStashItemDragStart(event) {
+    if ($(event.target).closest("button, input, label").length) {
+      event.preventDefault();
+      return;
+    }
     if ($(event.target).closest(".pf1-stash-container-item").length) return;
     const stashId = event.currentTarget.dataset.itemId;
     const stash = getStash(this.actor);
     const item = stash.items.find(i => i.stashId === stashId);
     if (!item) return;
-    const source = prepareStashItemSourceForPF1Sheet(item);
+    const source = prepareStashItemSourceForActor(item);
     delete source._id;
     source.flags = source.flags || {};
     source.flags[MODULE_ID] = source.flags[MODULE_ID] || {};
@@ -5069,7 +5140,7 @@ class PF1PartyActorSheet extends ActorSheet {
     const itemId = row.dataset.itemId;
     const context = getInlineStashContainerContext(this.actor, containerStashId, itemId);
     if (!context || context.itemIndex < 0) return;
-    const source = deepClone(context.inventory[context.itemIndex]);
+    const source = restoreStashTransferImages(deepClone(context.inventory[context.itemIndex]));
     delete source._id;
     source.flags = source.flags || {};
     source.flags[MODULE_ID] = source.flags[MODULE_ID] || {};
@@ -5114,7 +5185,7 @@ class PF1PartyActorSheet extends ActorSheet {
     await this._openStashItem(event.currentTarget.dataset.itemId);
   }
 
-  async _openStashItem(stashId) {
+  async _openStashItem(stashId, containerItemId = null) {
     const scrollSnapshots = captureOpenPartySheetScrolls();
     await this._saveQueuedStashQuantity(stashId);
     restoreOpenPartySheetScrolls(scrollSnapshots);
@@ -5123,13 +5194,15 @@ class PF1PartyActorSheet extends ActorSheet {
     const stashItem = stash.items.find(i => i.stashId === stashId);
     if (!stashItem) return;
 
-    const source = prepareStashItemSourceForPF1Sheet(stashItem);
+    const context = containerItemId ? getInlineStashContainerContext(this.actor, stashId, containerItemId) : null;
+    if (containerItemId && (!context || context.itemIndex < 0)) return;
+    const source = prepareStashItemSourceForPF1Sheet(containerItemId ? context.inventory[context.itemIndex] : stashItem);
     const editable = this.actor.testUserPermission(game.user, "OWNER");
     try {
       const ItemClass = CONFIG.Item?.documentClass ?? globalThis.Item;
       if (!ItemClass) throw new Error("Item document class is not available.");
       const item = new ItemClass(source, { parent: this.actor });
-      registerOpenStashItemSource(item, this.actor, stashId);
+      if (!containerItemId) registerOpenStashItemSource(item, this.actor, stashId);
       if (typeof item.prepareData === "function") item.prepareData();
       const originalTestUserPermission = item.testUserPermission?.bind(item);
       item.testUserPermission = (user, permission, ...args) => editable || originalTestUserPermission?.(user, permission, ...args) || false;
@@ -5137,12 +5210,15 @@ class PF1PartyActorSheet extends ActorSheet {
         if (!editable) return item;
         const updateScrollSnapshots = captureOpenPartySheetScrolls();
         if (typeof item.updateSource === "function") item.updateSource(changes, options);
-        if (typeof item.prepareData === "function") item.prepareData();
         const expanded = foundry.utils.expandObject(changes ?? {});
-        const nextSource = item.toObject
+        const nextSource = synchronizeStashSourceImages(item.toObject
           ? item.toObject()
-          : mergeObject(source, expanded, { inplace: false });
-        await updateStashItemSource(this.actor, stashId, nextSource);
+          : mergeObject(source, expanded, { inplace: false }));
+        // Keep the open temporary document in sync with the images saved to the stash.
+        item.updateSource?.(nextSource);
+        item.prepareData?.();
+        if (containerItemId) await updateInlineStashContainerItemSource(this.actor, stashId, containerItemId, nextSource);
+        else await updateStashItemSource(this.actor, stashId, nextSource);
         for (const app of Object.values(item.apps ?? {})) {
           if (app.rendered) app.render(false);
         }
@@ -5153,7 +5229,7 @@ class PF1PartyActorSheet extends ActorSheet {
       item.delete = async () => {
         if (editable) {
           const deleteScrollSnapshots = captureOpenPartySheetScrolls();
-          await this._deleteStashItem(stashId);
+          await this._deleteStashItem(stashId, containerItemId);
           await renderOpenPartySheets();
           restoreOpenPartySheetScrolls(deleteScrollSnapshots);
         }
@@ -5291,6 +5367,7 @@ class PF1PartyActorSheet extends ActorSheet {
 
     rowElement.toggleClass("is-empty-stack", quantity <= 0);
     rowElement.find(".pf1-stash-quantity-input").val(quantity);
+    rowElement.children(".pf1-stash-charges").find("input").val(getItemChargesView(source).charges);
 
     const priceInput = rowElement.find(".pf1-stash-price input")[0];
     if (priceInput) {
@@ -5426,6 +5503,8 @@ class PF1PartyActorSheet extends ActorSheet {
         ? quantity + Math.floor(toNumber(rawValue, 0))
         : Math.floor(toNumber(rawValue, emptyValue ? 0 : quantity));
       setItemQuantity(source, Math.max(0, next));
+    } else if (field === "charges") {
+      setItemCharges(source, emptyValue ? 0 : rawValue);
     } else if (field === "price") {
       setItemPriceGpEach(source, Math.max(0, toNumber(rawValue, emptyValue ? 0 : getItemPriceGpEach(source))));
     } else if (field === "weight") {
@@ -5472,6 +5551,8 @@ class PF1PartyActorSheet extends ActorSheet {
     const emptyValue = String(rawValue ?? "").trim() === "";
     if (field === "quantity") {
       setItemQuantity(source, Math.floor(toNumber(rawValue, emptyValue ? 0 : quantity)));
+    } else if (field === "charges") {
+      setItemCharges(source, emptyValue ? 0 : rawValue);
     } else if (field === "price") {
       setItemPriceGpEach(source, Math.max(0, toNumber(rawValue, emptyValue ? 0 : getItemPriceGpEach(source))));
     } else if (field === "weight") {
@@ -5599,7 +5680,7 @@ class PF1PartyActorSheet extends ActorSheet {
         await this._splitCurrency();
         break;
       case "split-stash-item":
-        await this._splitStashItem(button.dataset.itemId);
+        await this._splitStashItem(button.dataset.itemId, button.dataset.containerItemId || null);
         break;
       case "toggle-stash-container": {
         const stashId = button.dataset.itemId;
@@ -5620,7 +5701,7 @@ class PF1PartyActorSheet extends ActorSheet {
         await this._toggleStashIdentification(button.dataset.itemId, button.dataset.containerItemId || null);
         break;
       case "edit-stash-item":
-        await this._openStashItem(button.dataset.itemId);
+        await this._openStashItem(button.dataset.itemId, button.dataset.containerItemId || null);
         return;
       case "change-stash-quantity":
         this._changeStashQuantity(button.dataset.itemId, toNumber(button.dataset.delta, 0), {
@@ -5638,10 +5719,10 @@ class PF1PartyActorSheet extends ActorSheet {
         this._renderPreservingScroll();
         return;
       case "take-item":
-        await this._takeItem(button.dataset.itemId);
+        await this._takeItem(button.dataset.itemId, button.dataset.containerItemId || null);
         break;
       case "delete-stash-item":
-        await this._deleteStashItem(button.dataset.itemId);
+        await this._deleteStashItem(button.dataset.itemId, button.dataset.containerItemId || null);
         break;
       case "stash-category-add":
         await this._createStashItem(button.dataset.category);
@@ -5887,14 +5968,16 @@ class PF1PartyActorSheet extends ActorSheet {
     ui.notifications.info("Монеты распределены между участниками партии без конвертации номиналов.");
   }
 
-  async _splitStashItem(stashId) {
+  async _splitStashItem(stashId, containerItemId = null) {
     const stash = getStash(this.actor);
     const index = stash.items.findIndex(i => i.stashId === stashId);
     const item = stash.items[index];
     if (!item) return;
 
-    const source = getStashItemSource(item);
-    const quantity = getItemQuantity(source);
+    let context = containerItemId ? getInlineStashContainerContext(this.actor, stashId, containerItemId) : null;
+    if (containerItemId && (!context || context.itemIndex < 0)) return;
+    let source = containerItemId ? deepClone(context.inventory[context.itemIndex]) : getStashItemSource(item);
+    let quantity = getItemQuantity(source);
     if (quantity <= 1) return ui.notifications.warn("Этот предмет нельзя разделить: количество уже равно 1.");
 
     const content = `
@@ -5903,7 +5986,7 @@ class PF1PartyActorSheet extends ActorSheet {
         <p class="notes">В исходной стопке останется ${quantity - 1} из ${quantity}.</p>
       </form>`;
     const amount = await dialogPromise({
-      title: `Разделить «${escapeHTML(item.name || source.name || "Предмет")}»`,
+      title: `Разделить «${escapeHTML(getItemDisplayName(source))}»`,
       content,
       buttons: {
         ok: {
@@ -5915,10 +5998,26 @@ class PF1PartyActorSheet extends ActorSheet {
     });
     if (!amount) return;
 
+    // The container may have changed while the split dialog was open.
+    if (containerItemId) {
+      context = getInlineStashContainerContext(this.actor, stashId, containerItemId);
+      if (!context || context.itemIndex < 0) return;
+      source = deepClone(context.inventory[context.itemIndex]);
+      quantity = getItemQuantity(source);
+      if (quantity <= 1) return;
+    }
     const splitAmount = Math.min(quantity - 1, Math.max(1, amount));
     const originalSource = setItemQuantity(source, quantity - splitAmount);
     const splitSource = setItemQuantity(deepClone(source), splitAmount);
     splitSource._id = foundry.utils.randomID();
+
+    if (containerItemId) {
+      context.inventory[context.itemIndex] = originalSource;
+      context.inventory.splice(context.itemIndex + 1, 0, splitSource);
+      context.containerSource.system.inventoryItems = context.inventory;
+      await updateStashItemSource(this.actor, stashId, context.containerSource);
+      return;
+    }
 
     stash.items[index] = buildStashItemEntry(item, originalSource);
     stash.items.splice(index + 1, 0, buildStashItemEntry({
@@ -5929,7 +6028,7 @@ class PF1PartyActorSheet extends ActorSheet {
     await setStash(this.actor, stash);
   }
 
-  async _takeItem(stashId) {
+  async _takeItem(stashId, containerItemId = null) {
     const members = getPartyViewMembers(this.actor, "stash", { folderId: this._memberFolderId }).filter(actor => actor.testUserPermission(game.user, "OWNER"));
     if (!members.length) return ui.notifications.warn("Нет доступных листов персонажей.");
 
@@ -5944,21 +6043,35 @@ class PF1PartyActorSheet extends ActorSheet {
     const actor = game.actors.get(result);
     const stash = getStash(this.actor);
     const item = stash.items.find(i => i.stashId === stashId);
-    if (!actor || !item) return;
+    if (!actor || !item || !actor.testUserPermission(game.user, "OWNER")) return;
 
-    const source = prepareStashItemSourceForPF1Sheet(item);
+    const context = containerItemId ? getInlineStashContainerContext(this.actor, stashId, containerItemId) : null;
+    if (containerItemId && (!context || context.itemIndex < 0)) return;
+    const source = prepareStashItemSourceForActor(containerItemId ? context.inventory[context.itemIndex] : item);
     delete source._id;
-    await actor.createEmbeddedDocuments("Item", [source]);
+    const created = await actor.createEmbeddedDocuments("Item", [source]);
+    if (!created?.length) return;
+    if (containerItemId) {
+      await updateInlineStashContainerItemSource(this.actor, stashId, containerItemId, null);
+      return;
+    }
     stash.items = stash.items.filter(i => i.stashId !== stashId);
     await setStash(this.actor, stash);
   }
 
-  async _deleteStashItem(stashId) {
+  async _deleteStashItem(stashId, containerItemId = null) {
     const stash = getStash(this.actor);
     const item = stash.items.find(i => i.stashId === stashId);
     if (!item) return;
-    const confirmed = await Dialog.confirm({ title: "Удалить предмет", content: `<p>Удалить «${escapeHTML(item.name)}» из общего тайника?</p>` });
+    const context = containerItemId ? getInlineStashContainerContext(this.actor, stashId, containerItemId) : null;
+    if (containerItemId && (!context || context.itemIndex < 0)) return;
+    const source = containerItemId ? context.inventory[context.itemIndex] : getStashItemSource(item);
+    const confirmed = await Dialog.confirm({ title: "Удалить предмет", content: `<p>Удалить «${escapeHTML(getItemDisplayName(source))}» ${containerItemId ? "из контейнера" : "из общего тайника"}?</p>` });
     if (!confirmed) return;
+    if (containerItemId) {
+      await updateInlineStashContainerItemSource(this.actor, stashId, containerItemId, null);
+      return;
+    }
     stash.items = stash.items.filter(i => i.stashId !== stashId);
     await setStash(this.actor, stash);
   }
@@ -6180,7 +6293,7 @@ class PF1StashIdentificationApp extends Application {
 
   async getData(options = {}) {
     const data = await super.getData(options);
-    const tables = buildStashIdentificationData(getStash(this.partyActor));
+    const tables = buildStashIdentificationData(getStash(this.partyActor), getPartyMetagameSettings(this.partyActor).replaceUnidentifiedStashIcons);
     const actors = getIdentificationActorsForCurrentUser(this.partyActor);
     const metagame = getPartyMetagameSettings(this.partyActor);
     const showIdentificationDC = game.user.isGM || !metagame.hideIdentificationDC;
@@ -6208,7 +6321,7 @@ class PF1StashIdentificationApp extends Application {
 
   async _rollIdentification(event) {
     event.preventDefault();
-    const tables = buildStashIdentificationData(getStash(this.partyActor));
+    const tables = buildStashIdentificationData(getStash(this.partyActor), getPartyMetagameSettings(this.partyActor).replaceUnidentifiedStashIcons);
     if (!tables.unidentified.length) return ui.notifications.info("В тайнике нет неопознанных магических предметов.");
     const mode = await dialogPromise({
       title: "Опознание предметов",
@@ -7428,7 +7541,8 @@ Hooks.on("updateActor", async (actor, changed, options = {}, userId = null) => {
   }
   const changedHeroPoints = has(changed, `flags.${MODULE_ID}.${HERO_POINTS_FLAG}`);
   const changedStash = has(changed, `flags.${MODULE_ID}.${STASH_FLAG}`);
-  if (party && actor?.id === party.id && changedStash) {
+  const changedMetagame = has(changed, `flags.${MODULE_ID}.${METAGAME_FLAG}`);
+  if (party && actor?.id === party.id && (changedStash || changedMetagame)) {
     renderOpenStashIdentificationApps(party.id);
   }
   if (party && actor?.id === party.id && changedHeroPoints) {

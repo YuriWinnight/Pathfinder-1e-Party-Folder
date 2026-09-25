@@ -1,5 +1,29 @@
 # PF1e Party Folder
 
+## Changes in version 2.2.7
+
+- Reduce charge input width to 28px and align the compact charge block next to the price column, reclaiming name space.
+- Synchronize images on the open temporary item document before rendering after edits, so identification changes update immediately for both stash items and container contents.
+
+## Changes in version 2.2.6
+
+- Make party settings resizable and scrollable while keeping action buttons visible.
+- Enlarge charge inputs with symmetric current/max spacing; items without charges reclaim the charge column for their names.
+- Add edit, split, transfer and delete controls to container contents alongside identification. Changes target the contained item and preserve the container and its other contents.
+
+## Changes in version 2.2.5
+
+- Align stash headers, item rows and container contents on one shared column layout; charges sit immediately before price without a heading.
+- Tighten spacing around the current/max charge separator.
+- Add an enabled-by-default per-party option for unidentified icon replacement. Disabling it displays original icons in the stash and identification tables without changing stored images or actor inventory behavior; Ru Improvements' global toggle remains respected.
+
+## Changes in version 2.2.4
+
+- Unidentified stash items use their unidentified price; editing it preserves the identified price and price per charge.
+- Show and edit remaining charges in stash rows and container contents. Recalculate values using PF1's base price plus remaining-charge value and broken-item adjustment.
+- Restore original image data at actor-transfer boundaries so Ru Improvements preserves the correct icon during creation and later identification.
+- Correct the fourteen requested creature labels and search terms across all token colors without renaming image files.
+
 ## Changes in version 2.2.3
 
 - Participant names use the prototype token name, including existing snapshot views, skill tooltips and member selection menus; blank token names fall back to the actor name.

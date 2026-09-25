@@ -408,11 +408,12 @@
                 <div class="pf1-stash-item-list {{#unless items.length}}is-empty{{/unless}}">
                   {{#each items}}
                     <div class="pf1-stash-item pf1-party-item {{#if emptyStack}}is-empty-stack{{/if}} {{#if isContainer}}is-container{{/if}} {{#if containerOpen}}is-container-open{{/if}}" data-item-id="{{stashId}}" data-search="{{search}}" draggable="true">
-                      <div class="pf1-stash-item-name">
+                      <div class="pf1-stash-item-name{{#unless hasCharges}} pf1-stash-name-wide{{/unless}}">
                         {{#if isContainer}}<button type="button" class="pf1-stash-container-toggle" data-action="toggle-stash-container" data-item-id="{{stashId}}" aria-expanded="{{containerOpen}}" title="Показать содержимое"><i class="fas {{#if containerOpen}}fa-chevron-down{{else}}fa-chevron-right{{/if}}"></i></button>{{/if}}
                         <img src="{{img}}" alt="{{name}}">
                         <span>{{name}}</span>
                       </div>
+                      <div class="pf1-stash-charges">{{#if hasCharges}}<label title="Заряды за один предмет"><input aria-label="Текущие заряды" type="number" min="0" {{#if chargesMax}}max="{{chargesMax}}"{{/if}} step="1" class="pf1-stash-field" data-field="charges" data-item-id="{{stashId}}" value="{{charges}}">{{#if chargesMax}}<span>/</span><span>{{chargesMax}}</span>{{/if}}</label>{{/if}}</div>
                       <label class="pf1-stash-price" title="Наведи или нажми, чтобы изменить цену за штуку"><input type="text" class="pf1-stash-field" data-field="price" data-item-id="{{stashId}}" data-price-each="{{priceEach}}" data-price-total="{{priceGp}}" value="{{priceGp}}"><span>зм</span></label>
                       <span class="pf1-stash-quantity" data-item-id="{{stashId}}" title="Кнопки меняют количество">
                         <button type="button" data-action="change-stash-quantity" data-delta="-1" data-item-id="{{stashId}}" title="Убавить количество">−</button>
@@ -432,7 +433,8 @@
                         <div class="pf1-stash-container-contents" data-container-stash-id="{{stashId}}">
                           {{#each containerItems}}
                             <div class="pf1-stash-container-item" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" data-search="{{search}}" draggable="true">
-                              <div class="pf1-stash-container-item-name"><img src="{{img}}" alt="{{name}}"><span>{{name}}</span></div>
+                              <div class="pf1-stash-container-item-name{{#unless hasCharges}} pf1-stash-name-wide{{/unless}}"><img src="{{img}}" alt="{{name}}"><span>{{name}}</span></div>
+                              <div class="pf1-stash-charges">{{#if hasCharges}}<label title="Заряды за один предмет"><input aria-label="Текущие заряды" type="number" min="0" {{#if chargesMax}}max="{{chargesMax}}"{{/if}} step="1" class="pf1-stash-container-field" data-field="charges" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" value="{{charges}}">{{#if chargesMax}}<span>/</span><span>{{chargesMax}}</span>{{/if}}</label>{{/if}}</div>
                               <label class="pf1-stash-price pf1-stash-container-item-price" title="Наведи или нажми, чтобы изменить цену за штуку"><input type="text" class="pf1-stash-container-field" data-field="price" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" data-price-each="{{priceEach}}" data-price-total="{{priceGp}}" value="{{priceGp}}"><span>зм</span></label>
                               <span class="pf1-stash-quantity pf1-stash-container-item-quantity" title="Кнопки меняют количество">
                                 <button type="button" data-action="change-stash-container-quantity" data-delta="-1" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" title="Убавить количество">−</button>
@@ -440,7 +442,13 @@
                                 <button type="button" data-action="change-stash-container-quantity" data-delta="1" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" title="Добавить количество">+</button>
                               </span>
                               <label class="pf1-stash-weight pf1-stash-container-item-weight" title="Изменить вес"><input type="text" class="pf1-stash-container-field" data-field="weight" data-container-stash-id="{{../stashId}}" data-item-id="{{itemId}}" value="{{weight}}"><span>фнт.</span></label>
-                              {{#if @root.party.canToggleIdentification}}<button type="button" class="pf1-stash-container-identify" data-action="toggle-stash-identification" data-item-id="{{../stashId}}" data-container-item-id="{{itemId}}" title="{{identifyTitle}}"><i class="fas {{identifyIcon}}"></i></button>{{/if}}
+                              <div class="pf1-stash-item-controls">
+                                {{#if @root.party.canToggleIdentification}}<button type="button" data-action="toggle-stash-identification" data-item-id="{{../stashId}}" data-container-item-id="{{itemId}}" title="{{identifyTitle}}"><i class="fas {{identifyIcon}}"></i></button>{{/if}}
+                                <button type="button" data-action="edit-stash-item" data-item-id="{{../stashId}}" data-container-item-id="{{itemId}}" title="Редактировать"><i class="fas fa-edit"></i></button>
+                                <button type="button" data-action="split-stash-item" data-item-id="{{../stashId}}" data-container-item-id="{{itemId}}" title="Разделить стопку"><i class="fas fa-divide"></i></button>
+                                <button type="button" data-action="take-item" data-item-id="{{../stashId}}" data-container-item-id="{{itemId}}" title="Забрать в лист"><i class="fas fa-hand-paper"></i></button>
+                                <button type="button" data-action="delete-stash-item" data-item-id="{{../stashId}}" data-container-item-id="{{itemId}}" title="Удалить"><i class="fas fa-trash"></i></button>
+                              </div>
                             </div>
                           {{else}}
                             <div class="pf1-stash-container-empty">Пусто</div>
