@@ -58,7 +58,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.2.7";
+const MODULE_VERSION_LABEL = "v2.2.8";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -2655,6 +2655,20 @@ async function handlePartyFolderSocket(payload) {
   const requester = game.users?.get(payload.requestedBy);
   const partyActor = game.actors?.get(payload.partyActorId);
   if (!requester?.active || !partyActor?.getFlag?.(MODULE_ID, PARTY_FLAG)) return;
+  if (payload.action === "whisper-stash-curse-failure") {
+    const actor = game.actors?.get(payload.actorId);
+    if (!actor || !getPartyMembers(partyActor, { ignorePermissions: true }).some(member => member.id === actor.id)) return;
+    if (!memberAppearsInView(partyActor, actor, "stash", { user: requester })) return;
+    const metagame = getPartyMetagameSettings(partyActor);
+    if (metagame.identifyOnlyAsSelf && !requester.isGM && requester.character?.id !== actor.id) return;
+    const tables = buildStashIdentificationData(getStash(partyActor));
+    const entry = [...tables.identified, ...tables.unidentified].find(row => row.stashId === payload.stashId
+      && (row.containerItemId ?? null) === (payload.containerItemId ?? null));
+    const total = Number(payload.rollTotal);
+    if (!entry?.cursed || !Number.isFinite(total) || total < entry.identifyDC || total >= entry.curseIdentifyDC) return;
+    await whisperFailedStashCurseIdentification(actor, { ...entry, roll: { total } }, partyActor);
+    return;
+  }
   if (payload.action === "set-stash-identification") {
     const entries = serializeIdentificationEntries(payload.entries).slice(0, 250);
     if (!entries.length) return;
@@ -2735,7 +2749,7 @@ function getStashItemView(stashItem, replaceUnknownIcons = true) {
     containerItems,
     containerItemCount: containerItems.length,
     ...getItemChargesView(data),
-    description: getItemDescriptionHTML(data).trim(),
+    description: getStashItemDescriptionHTML(data).trim(),
     search: `${getItemDisplayName(data, stashItem.name || "")} ${stashItem.type || data.type || ""} ${containerItems.map(item => item.name).join(" ")}`.toLowerCase(),
     ...getItemIdentificationView(data)
   };
@@ -3339,6 +3353,27 @@ function getItemDescriptionHTML(itemSource) {
     ?? "";
   if (raw && typeof raw === "object") return raw.value ?? raw.chat ?? "";
   return String(raw || "");
+}
+
+function getStashItemDescriptionHTML(source) {
+  if (isItemIdentified(source)) return getItemDescriptionHTML(source);
+  const raw = gprop(source, "system.description.unidentified")
+    ?? gprop(source, "data.data.description.unidentified") ?? "";
+  return String(raw && typeof raw === "object" ? raw.value ?? "" : raw);
+}
+
+async function enrichStashDescriptions(view, partyActor) {
+  for (const category of view.categories ?? []) {
+    for (const item of category.items ?? []) {
+      item.description = await TextEditor.enrichHTML(item.description, {
+        async: true,
+        secrets: game.user.isGM,
+        relativeTo: partyActor,
+        rollData: partyActor.getRollData?.() ?? {}
+      });
+    }
+  }
+  return view;
 }
 
 function buildStashItemEntry(oldEntry, itemSource) {
@@ -4933,7 +4968,7 @@ class PF1PartyActorSheet extends ActorSheet {
       quickRollPublic: this._quickRollMode !== "blindroll",
       quickRollHidden: this._quickRollMode === "blindroll",
       travel: overviewStats.travel,
-      stash: buildStashView(stash, this._openStashContainers, metagame.replaceUnidentifiedStashIcons),
+      stash: await enrichStashDescriptions(buildStashView(stash, this._openStashContainers, metagame.replaceUnidentifiedStashIcons), this.actor),
       stashTotals: buildStashTotals(stash),
       partyTotals
     }, { inplace: false });
@@ -6164,13 +6199,28 @@ function getIdentificationActorsForCurrentUser(partyActor) {
   return members.filter(actor => actor.id === game.user.character?.id);
 }
 
-async function whisperFailedStashCurseIdentification(actor, entry) {
+async function whisperFailedStashCurseIdentification(actor, entry, partyActor = getPartyForMember(actor)) {
   if (!activeRuImprovementsModule()) return;
+  if (!game.user.isGM) {
+    if (!partyActor || !game.users?.activeGM?.active) return;
+    game.socket.emit(SOCKET_CHANNEL, {
+      action: "whisper-stash-curse-failure",
+      requestedBy: game.user.id,
+      partyActorId: partyActor.id,
+      actorId: actor.id,
+      stashId: entry.stashId,
+      containerItemId: entry.containerItemId ?? null,
+      rollTotal: toNumber(entry.roll?.total, 0)
+    });
+    return;
+  }
   const recipients = ChatMessage.getWhisperRecipients("GM").map(user => user.id);
   if (!recipients.length) return;
   await ChatMessage.create({
+    user: game.user.id,
     speaker: ChatMessage.getSpeaker({ actor }),
     whisper: recipients,
+    blind: true,
     content: `<section class="pf1-identification-chat-curse-secret">
       <h4><i class="fas fa-user-secret"></i> Неопознанное проклятие</h4>
       <p><b>${escapeHTML(getPartyMemberName(actor))}</b> опознал предмет <b>${escapeHTML(entry.realName || entry.name)}</b>, но не распознал его проклятие.</p>
@@ -6180,7 +6230,7 @@ async function whisperFailedStashCurseIdentification(actor, entry) {
       [RU_IMPROVEMENTS_ID]: {
         curseIdentificationSecret: true,
         actorUuid: actor.uuid,
-        partyActorId: getPartyForMember(actor)?.id ?? getPartyActor()?.id ?? null,
+        partyActorId: partyActor?.id ?? null,
         stashId: entry.stashId,
         containerItemId: entry.containerItemId ?? null,
         curseIdentifyDC: entry.curseIdentifyDC,
@@ -6260,7 +6310,7 @@ async function performStashIdentificationRolls(partyActor, actor, targets, {
       });
     }
     if (activeRuImprovementsModule() && result.success && result.cursed && !result.curseSuccess) {
-      await whisperFailedStashCurseIdentification(actor, result);
+      await whisperFailedStashCurseIdentification(actor, result, partyActor);
     }
     if (activeRuImprovementsModule() && result.curseSuccess) playRuImprovementsCurseRevealSound();
   }

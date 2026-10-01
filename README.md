@@ -1,5 +1,11 @@
 # PF1e Party Folder
 
+## Changes in version 2.2.8
+
+- Send failed curse identification notices through the active GM as blind GM-only messages, excluding the rolling player.
+- Use the unidentified description for unidentified stash items without falling back to their hidden identified text.
+- Enrich expanded stash descriptions with Foundry's native content links and player-aware secret filtering.
+
 ## Changes in version 2.2.7
 
 - Reduce charge input width to 28px and align the compact charge block next to the price column, reclaiming name space.
