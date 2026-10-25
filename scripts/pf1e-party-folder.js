@@ -58,7 +58,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.2.8";
+const MODULE_VERSION_LABEL = "v2.2.9";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -684,6 +684,7 @@ function getPartyMemberAccess(partyActor, member, user = game.user, displayFolde
   if (user.isGM) return 3;
   const actor = game.actors?.get(member.id);
   const nativeAccess = getActorUserAccess(actor, user);
+  if (getPartyMetagameSettings(partyActor).observerViewForRestrictedMembers) return Math.max(2, nativeAccess);
   // Assigned player characters are public party members, without granting ownership.
   const assigned = [...(game.users ?? [])].some(player => !player.isGM && player.character?.id === member.id);
   if (assigned) return Math.max(2, nativeAccess);
@@ -4698,6 +4699,7 @@ async function createItemFromDroppedSpell(item) {
 function defaultMetagameSettings() {
   return {
     showAllPartyStatistics: false,
+    observerViewForRestrictedMembers: false,
     autoIdentifyItems: false,
     replaceUnidentifiedStashIcons: true,
     groupMembersByFolder: false,
@@ -4718,8 +4720,14 @@ function userOwnsActor(actor, user = game.user) {
   return Boolean(actor && getActorUserAccess(actor, user) >= 3);
 }
 
+function isPartyMemberObserverOnly(partyActor, member, user = game.user) {
+  return !user.isGM && getPartyMetagameSettings(partyActor).observerViewForRestrictedMembers
+    && getActorUserAccess(game.actors?.get(member?.id), user) < 2;
+}
+
 function canRollPartyActor(partyActor, actor) {
   if (!actor || game.user.isGM) return Boolean(actor);
+  if (isPartyMemberObserverOnly(partyActor, actor)) return false;
   if (getPartyMemberAccess(partyActor, actor) < 2) return false;
   const settings = getPartyMetagameSettings(partyActor);
   return !settings.restrictStatisticRollsToOwned || userOwnsActor(actor);
@@ -4762,6 +4770,7 @@ function metagameDialog(current = {}) {
     <form class="pf1-party-dialog pf1-metagame-dialog">
       <p>Ограничить доступ к метаигровой информации, к которой имеют доступ ваши игроки.</p>
       <input type="checkbox" name="showAllPartyStatistics" hidden ${checked("showAllPartyStatistics")}>
+      <label><span><b>Полный просмотр участников без доступа к листу</b><em>При ограниченном или отсутствующем доступе показывает данные участника в Обзоре, Статистике и Тайнике как наблюдателю, без редактирования и бросков. Права на листы не меняются. Отдельные настройки скрытия участников и информации сохраняют силу.</em></span><input type="checkbox" name="observerViewForRestrictedMembers" ${checked("observerViewForRestrictedMembers")}></label>
       <p>Полная статистика доступна наблюдателям и владельцам актёра. Редактирование доступно владельцу независимо от настроек просмотра.</p>
       <label><span><b>Чужая статистика только для просмотра</b><em>Игрок видит статистику всей партии, но бросает проверки только за персонажей, которыми владеет. Мастера ограничение не затрагивает.</em></span><input type="checkbox" name="restrictStatisticRollsToOwned" ${checked("restrictStatisticRollsToOwned")}></label>
       <label><span><b>Скрывать СЛ опознания</b><em>Игроки не видят сложность опознания в таблицах и сообщениях чата. Мастеру СЛ видна всегда.</em></span><input type="checkbox" name="hideIdentificationDC" ${checked("hideIdentificationDC")}></label>
@@ -4860,10 +4869,10 @@ class PF1PartyActorSheet extends ActorSheet {
 
   async getData(options) {
     const data = await super.getData(options);
-    const members = getPartyMembers(this.actor);
+    const metagame = getPartyMetagameSettings(this.actor);
+    const members = getPartyMembers(this.actor, { ignorePermissions: metagame.observerViewForRestrictedMembers });
     const stash = this._withPendingStashQuantities(getStash(this.actor));
     const heroPoints = getHeroPoints(this.actor);
-    const metagame = getPartyMetagameSettings(this.actor);
     const liveStats = buildPartyStatsData(members, stash, heroPoints);
     if (game.user.isGM && !getPublicPartySnapshot(this.actor)) schedulePublicPartySnapshotRefresh(this.actor);
     const publicStats = getPublicPartySnapshot(this.actor);
@@ -4889,7 +4898,7 @@ class PF1PartyActorSheet extends ActorSheet {
           statistics: { editable: false, rollable: false }, rollable: false };
       }
       // Hero points are live party flags, even when member statistics use a public snapshot.
-      return { ...member, name, access, limited: false, heroPoints: getHeroPointState(heroPoints, member.id), rollable, statistics: { ...member.statistics, editable, rollable } };
+      return { ...member, name, access, limited: false, observerOnly: isPartyMemberObserverOnly(this.actor, member), heroPoints: getHeroPointState(heroPoints, member.id), rollable, statistics: { ...member.statistics, editable, rollable } };
     });
     const displayRules = getMemberDisplayRules(this.actor);
     const visibleFolderIds = new Set([folders[0]?.id]);
@@ -5345,6 +5354,7 @@ class PF1PartyActorSheet extends ActorSheet {
 
   async _adjustHeroPoints(actorId, delta) {
     if (!actorId) return;
+    if (isPartyMemberObserverOnly(this.actor, { id: actorId })) return;
     await changeActorHeroPoints(this.actor, actorId, delta);
   }
 
@@ -5623,6 +5633,8 @@ class PF1PartyActorSheet extends ActorSheet {
     const actorId = button.dataset.actorId;
     const actor = actorId ? game.actors.get(actorId) : null;
     const actorRollActions = new Set(["roll-skill", "roll-combat-check", "roll-saving-throw", "roll-ability", "roll-initiative"]);
+    if (actor && isPartyMemberObserverOnly(this.actor, actor)
+      && (actorRollActions.has(action) || ["remove-member", "adjust-hero-points", "open-actor-traits"].includes(action))) return;
     if (actor && actorRollActions.has(action) && !canRollPartyActor(this.actor, actor)) {
       ui.notifications.warn("Эта настройка разрешает броски только за персонажей, которыми вы владеете.");
       return;

@@ -136,9 +136,9 @@
             </div>
             <div class="pf1-party-member-main">
               <div class="pf1-party-member-header">
-                <div class="pf1-party-member-name">{{name}} {{#unless limited}}<span class="pf1-remove-member" data-action="remove-member" data-actor-id="{{id}}" title="Убрать из партии">×</span>{{/unless}}</div>
+                <div class="pf1-party-member-name">{{name}} {{#unless limited}}{{#unless observerOnly}}<span class="pf1-remove-member" data-action="remove-member" data-actor-id="{{id}}" title="Убрать из партии">×</span>{{/unless}}{{/unless}}</div>
                 {{#if heroPoints.enabled}}
-                  <a class="pf1-hero-points" data-action="adjust-hero-points" data-actor-id="{{id}}" title="Геройские очки: {{heroPoints.value}} / {{heroPoints.max}}. ЛКМ +1, ПКМ −1. Shift+клик по броску: +8 перед броском.">
+                  <a class="pf1-hero-points" {{#unless observerOnly}}data-action="adjust-hero-points"{{/unless}} data-actor-id="{{id}}" title="Геройские очки: {{heroPoints.value}} / {{heroPoints.max}}. {{#if observerOnly}}Только просмотр.{{else}}ЛКМ +1, ПКМ −1. Shift+клик по броску: +8 перед броском.{{/if}}">
                     {{#each heroPoints.pips}}
                       {{#if filled}}
                         <img class="pf1-hero-point-pip is-filled" data-index="{{index}}" src="{{../heroPoints.icon}}" alt="">

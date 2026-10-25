@@ -1,5 +1,10 @@
 # PF1e Party Folder
 
+## Changes in version 2.2.9
+
+- Add an opt-in per-party observer view for members with limited or no native actor access across Overview, Statistics and Stash.
+- Preserve native actor ownership and explicit party privacy settings; promoted viewers cannot edit statistics, adjust hero points, remove members or roll individual checks for those actors.
+
 ## Changes in version 2.2.8
 
 - Send failed curse identification notices through the active GM as blind GM-only messages, excluding the rolling player.
