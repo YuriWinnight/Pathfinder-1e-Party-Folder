@@ -58,7 +58,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.2.9";
+const MODULE_VERSION_LABEL = "v2.2.10";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -2123,7 +2123,17 @@ function setItemQuantity(itemData, quantity) {
 
 function getItemWeightEach(itemData) {
   const legacyWeight = isDocumentLike(itemData) ? undefined : gprop(itemData, "data.data.weight");
-  return Math.max(0, toNumber(gprop(itemData, "system.weight") ?? gprop(itemData, "system.weight.value") ?? legacyWeight ?? 0, 0));
+  const weight = gprop(itemData, "system.weight") ?? legacyWeight ?? 0;
+  // PF1's total includes quantity and container contents; it is not a per-item weight.
+  return Math.max(0, toNumber(typeof weight === "object" ? weight.value ?? weight.base : weight, 0));
+}
+
+function normalizePF1ItemWeight(source) {
+  const value = getItemWeightEach(source);
+  source.system.weight = {
+    ...(source.system.weight && typeof source.system.weight === "object" ? source.system.weight : {}),
+    value
+  };
 }
 
 function getItemPriceGpEach(itemData) {
@@ -2832,6 +2842,7 @@ function normalizeContainerInventoryItems(value) {
       );
       source.system.description = source.system.description ?? { value: getItemDescriptionHTML(source) };
       if (typeof source.system.description === "string") source.system.description = { value: source.system.description };
+      normalizePF1ItemWeight(source);
       source.system.actions = arrayFromMaybeObject(source.system.actions);
       source.system.changes = arrayFromMaybeObject(source.system.changes);
       source.system.contextNotes = arrayFromMaybeObject(source.system.contextNotes);
@@ -3335,7 +3346,7 @@ function prepareStashItemSourceForPF1Sheet(stashItem) {
   source.system.description = source.system.description ?? { value: getItemDescriptionHTML(source) };
   if (typeof source.system.description === "string") source.system.description = { value: source.system.description };
   source.system.quantity = getItemQuantity(source);
-  source.system.weight = getItemWeightEach(source);
+  normalizePF1ItemWeight(source);
   source.system.price = parsePriceToGp(source.system.price);
   source.system.actions = arrayFromMaybeObject(source.system.actions);
   source.system.changes = arrayFromMaybeObject(source.system.changes);

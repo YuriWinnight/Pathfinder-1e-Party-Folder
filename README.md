@@ -1,5 +1,10 @@
 # PF1e Party Folder
 
+## Changes in version 2.2.10
+
+- Preserve PF1's structured per-item weight when opening stash item sheets, including container contents and legacy numeric weights.
+- Read per-item weight from weight.value rather than derived stack/container totals, avoiding multiplication of quantity twice.
+
 ## Changes in version 2.2.9
 
 - Add an opt-in per-party observer view for members with limited or no native actor access across Overview, Statistics and Stash.
