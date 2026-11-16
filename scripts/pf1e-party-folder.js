@@ -58,7 +58,7 @@ const PARTY_TOKEN_INDEX = `${PARTY_TOKEN_ASSET_ROOT}/index.json`;
 const PARTY_ICON = `${PARTY_TOKEN_ASSET_ROOT}/green-blank.webp`;
 const HERO_POINT_ICON = `modules/${MODULE_ID}/assets/pf2e-sheet/heads.webp`;
 const HERO_POINTS_MAX_DEFAULT = 3;
-const MODULE_VERSION_LABEL = "v2.2.10";
+const MODULE_VERSION_LABEL = "v2.2.11";
 
 function canManageMetagameSettings(user = game.user) {
   const assistantRole = CONST.USER_ROLES?.ASSISTANT ?? 3;
@@ -3357,6 +3357,25 @@ function prepareStashItemSourceForPF1Sheet(stashItem) {
   return source;
 }
 
+function prepareStashItemUpdate(item, changes, options = {}) {
+  const update = foundry.utils.expandObject(deepClone(changes ?? {}));
+  if (options.recursive === false) return update;
+  // Match PF1 Item.update: form rows omit targets, IDs and other non-input fields.
+  for (const path of ["system.attackNotes", "system.effectNotes", "system.contextNotes", "system.scriptCalls",
+    "system.actions", "system.inventoryItems", "system.changes"]) {
+    const patch = gprop(update, path);
+    if (patch == null || Array.isArray(patch) || typeof patch !== "object") continue;
+    const rows = deepClone(gprop(item, path) ?? []);
+    for (const [index, value] of Object.entries(patch)) {
+      rows[index] = value && typeof value === "object" && !Array.isArray(value)
+        ? mergeObject(rows[index] ?? {}, foundry.utils.expandObject(value), { inplace: false })
+        : value;
+    }
+    sprop(update, path, rows);
+  }
+  return update;
+}
+
 function getItemDescriptionHTML(itemSource) {
   const raw = gprop(itemSource, "system.description.value")
     ?? gprop(itemSource, "system.description")
@@ -5264,8 +5283,8 @@ class PF1PartyActorSheet extends ActorSheet {
       item.update = async (changes = {}, options = {}) => {
         if (!editable) return item;
         const updateScrollSnapshots = captureOpenPartySheetScrolls();
-        if (typeof item.updateSource === "function") item.updateSource(changes, options);
-        const expanded = foundry.utils.expandObject(changes ?? {});
+        const expanded = prepareStashItemUpdate(item, changes, options);
+        if (typeof item.updateSource === "function") item.updateSource(expanded, options);
         const nextSource = synchronizeStashSourceImages(item.toObject
           ? item.toObject()
           : mergeObject(source, expanded, { inplace: false }));

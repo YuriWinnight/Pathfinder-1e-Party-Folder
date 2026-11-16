@@ -1,5 +1,10 @@
 # PF1e Party Folder
 
+## Changes in version 2.2.11
+
+- Merge indexed partial item-sheet updates into existing PF1 arrays before saving temporary stash documents, preserving change targets, IDs and fields not submitted by the form.
+- Keep explicit array replacements and deletions intact; apply the same behavior to nested item sheets and other PF1 array fields.
+
 ## Changes in version 2.2.10
 
 - Preserve PF1's structured per-item weight when opening stash item sheets, including container contents and legacy numeric weights.
